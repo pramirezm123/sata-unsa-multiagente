@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Confidential Institutional Data (Strict Privacy - UNSA)
+03_Datasets/
+TESIS DATASET/
+Información académica_Notas Parciales_2018-2025/
+Información académica_Notas Parciales_2018-2025/
+*.csv
+*.xlsx
+*.xls
+*.ods
+*.pdf
+*.pdf_
+*.crdownload
+
+# Allow benchmark and metadata CSVs in 04_Modelo
+!04_Modelo/*.csv
+
+# Brain / System generated / Scratch scripts
+scratch/
+.system_generated/
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
