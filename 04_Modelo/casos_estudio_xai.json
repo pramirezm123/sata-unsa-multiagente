@@ -1,0 +1,38 @@
+{
+  "Alto_Riesgo": {
+    "CUI_hash": "20190638",
+    "Asignatura": "ANALISIS Y DISENO DE ALGORITMOS",
+    "Proba_CP1": 0.9729,
+    "Reprobado_Real": 1,
+    "IRA_ACUM": 10.5,
+    "EC1": 0.0,
+    "EP1": 5.0,
+    "PROM_F1": 2.5,
+    "NOTA_MIN_PEND_F1": 13.12,
+    "IMPOSIBLE_APROBAR_F1": 0
+  },
+  "Bajo_Riesgo": {
+    "CUI_hash": "20222074",
+    "Asignatura": "TEORIA DE LA COMPUTACION",
+    "Proba_CP1": 0.0,
+    "Reprobado_Real": 0,
+    "IRA_ACUM": 16.32,
+    "EC1": 19.0,
+    "EP1": 18.0,
+    "PROM_F1": 18.57,
+    "NOTA_MIN_PEND_F1": 6.92,
+    "IMPOSIBLE_APROBAR_F1": 0
+  },
+  "Caso_Limite": {
+    "CUI_hash": "20170614",
+    "Asignatura": "SEGURIDAD INFORMATICA",
+    "Proba_CP1": 0.3305,
+    "Reprobado_Real": 0,
+    "IRA_ACUM": 12.39,
+    "EC1": 15.0,
+    "EP1": 4.0,
+    "PROM_F1": 10.67,
+    "NOTA_MIN_PEND_F1": 11.16,
+    "IMPOSIBLE_APROBAR_F1": 0
+  }
+}

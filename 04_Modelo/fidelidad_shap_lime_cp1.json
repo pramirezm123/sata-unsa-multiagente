@@ -1,0 +1,7 @@
+{
+  "n_estudiantes": 100,
+  "n_variables": 25,
+  "total_pares_analizados": 2500,
+  "correlacion_pearson": 0.7778,
+  "coincidencia_direccion_pct": 77.78
+}

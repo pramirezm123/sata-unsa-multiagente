@@ -1,0 +1,202 @@
+{
+  "CP0_Random_Forest": [
+    [
+      3379,
+      1257
+    ],
+    [
+      44,
+      268
+    ]
+  ],
+  "CP0_Gradient_Boosting": [
+    [
+      2913,
+      1723
+    ],
+    [
+      27,
+      285
+    ]
+  ],
+  "CP0_HistGradientBoosting": [
+    [
+      3113,
+      1523
+    ],
+    [
+      29,
+      283
+    ]
+  ],
+  "CP0_Regresi\u00f3n_Log\u00edstica": [
+    [
+      3420,
+      1216
+    ],
+    [
+      48,
+      264
+    ]
+  ],
+  "CP0_\u00c1rbol_de_Decisi\u00f3n": [
+    [
+      3313,
+      1323
+    ],
+    [
+      61,
+      251
+    ]
+  ],
+  "CP1_Random_Forest": [
+    [
+      3924,
+      712
+    ],
+    [
+      39,
+      273
+    ]
+  ],
+  "CP1_Gradient_Boosting": [
+    [
+      3756,
+      880
+    ],
+    [
+      29,
+      283
+    ]
+  ],
+  "CP1_HistGradientBoosting": [
+    [
+      3801,
+      835
+    ],
+    [
+      30,
+      282
+    ]
+  ],
+  "CP1_Regresi\u00f3n_Log\u00edstica": [
+    [
+      3880,
+      756
+    ],
+    [
+      43,
+      269
+    ]
+  ],
+  "CP1_\u00c1rbol_de_Decisi\u00f3n": [
+    [
+      3740,
+      896
+    ],
+    [
+      56,
+      256
+    ]
+  ],
+  "CP2_Random_Forest": [
+    [
+      4275,
+      361
+    ],
+    [
+      48,
+      264
+    ]
+  ],
+  "CP2_Gradient_Boosting": [
+    [
+      4310,
+      326
+    ],
+    [
+      55,
+      257
+    ]
+  ],
+  "CP2_HistGradientBoosting": [
+    [
+      4299,
+      337
+    ],
+    [
+      50,
+      262
+    ]
+  ],
+  "CP2_Regresi\u00f3n_Log\u00edstica": [
+    [
+      4361,
+      275
+    ],
+    [
+      81,
+      231
+    ]
+  ],
+  "CP2_\u00c1rbol_de_Decisi\u00f3n": [
+    [
+      4049,
+      587
+    ],
+    [
+      36,
+      276
+    ]
+  ],
+  "CP3_Random_Forest": [
+    [
+      4576,
+      60
+    ],
+    [
+      36,
+      276
+    ]
+  ],
+  "CP3_Gradient_Boosting": [
+    [
+      4601,
+      35
+    ],
+    [
+      42,
+      270
+    ]
+  ],
+  "CP3_HistGradientBoosting": [
+    [
+      4612,
+      24
+    ],
+    [
+      37,
+      275
+    ]
+  ],
+  "CP3_Regresi\u00f3n_Log\u00edstica": [
+    [
+      4612,
+      24
+    ],
+    [
+      84,
+      228
+    ]
+  ],
+  "CP3_\u00c1rbol_de_Decisi\u00f3n": [
+    [
+      4553,
+      83
+    ],
+    [
+      22,
+      290
+    ]
+  ]
+}
