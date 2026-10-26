@@ -10,7 +10,7 @@
 En respuesta a las observaciones formuladas por la asesora respecto a la delimitación temporal de la predicción, la justificación de la arquitectura multiagente y la validez de la promesa de "reducción de reprobación", este documento presenta la reformulación metodológica integral respaldada por los nuevos avances técnicos del proyecto:
 1. **Incorporación efectiva de Calificaciones Parciales (2018–2025):** Se rescataron y procesaron 102,511 registros de evaluación continua y parcial provenientes de 3,498 actas semestrales oficiales de la EPIS-UNSA.
 2. **Definición de Checkpoints Temporales Precisos ($CP_0, CP_1, CP_2, CP_3$):** La predicción deja de ser un evento estático al inicio del semestre; ahora opera como un proceso dinámico de monitoreo intra-semestral (semanas 0, 6, 12 y 16).
-3. **Validación Experimental de Reducción Drástica de Falsas Alarmas:** Se demostró empíricamente en el conjunto de prueba (2024–2025) que el ingreso de notas parciales reduce las falsas alarmas en un **43.36% en Fase 1 ($CP_1$)**, **71.28% en Fase 2 ($CP_2$)** y **95.23% en Fase 3 ($CP_3$)**, manteniendo una sensibilidad ($\text{Recall} \ge 85\%$).
+3. **Validación Experimental de Reducción Drástica de Falsas Alarmas:** Se demostró empíricamente en el conjunto de prueba (2024–2025) que el ingreso de notas parciales reduce las falsas alarmas en un **43.36% en Fase 1 ($CP_1$)**, **71.28% en Fase 2 ($CP_2$)** y **95.23% en Fase 3 ($CP_3$)**, satisfaciendo holgadamente la restricción de sensibilidad ($\text{Recall} \ge 80\%$, alcanzando en prueba entre $84.6\%$ y $88.5\%$).
 4. **Desacoplamiento Hipotético y Operacional:** Se reestructuran formalmente las hipótesis y variables para evaluar por separado el desempeño predictivo (ML), la fidelidad de las explicaciones (XAI), la eficiencia de la arquitectura de software (SMA) y la aceptación de los usuarios (TAM/SUS).
 
 ---
@@ -112,8 +112,16 @@ La adopción de un Sistema Multiagente (SMA) responde a los principios de diseñ
 | Sección del Plan | Redacción Anterior | Ajuste Propuesto y Justificación |
 |---|---|---|
 | **Título** | "... para la reducción de la reprobación académica" | "... para la predicción del riesgo de reprobación académica universitaria" (Alineado con el alcance real y medible). |
+| **Sección 1.6.1 (Viabilidad Técnica)** | Mencionaba alternativas genéricas como JADE en Java, colas de mensajes y servicios web en Flask/FastAPI. | **Alineación con la implementación real:** Se sustituye por la arquitectura multiagente nativa en Python basada en un bus de eventos asíncrono con mensajes estandarizados bajo la norma FIPA-ACL y presentación interactiva en Streamlit. Esto elimina la fricción de interoperabilidad de JADE y garantiza costo cero de despliegue. |
 | **Sección 1.8 (Alcance)** | Dejaba las notas parciales como "trabajo futuro". | Se incorpora plenamente el análisis intra-semestral mediante 4 Checkpoints cronológicos ($CP_0$ a $CP_3$). |
 | **Sección 1.12 (Arquitectura)** | Diagrama esquemático conceptual de agentes. | Se formaliza el diseño e implementación del bus FIPA-ACL con 6 agentes especializados y Streamlit UI. |
 | **Capítulo III / Metodología** | División temporal previa sin notas parciales. | Protocolo de partición temporal estricto: Train ($\le 2022$), Val ($2023$ para fijar umbral), Test ($2024-2025$). |
 | **Capítulo IV / Resultados** | Línea base estática CP0 ($FP/TP = 4.8$). | Demostración de la cascada de reducción de falsas alarmas: $CP_0$ (4.69) $\rightarrow$ $CP_1$ (2.61) $\rightarrow$ $CP_2$ (1.37) $\rightarrow$ $CP_3$ (0.22). |
 | **Capítulo V / Validación** | Mencionaba genéricamente entrevistas. | Incorporación formal de Ficha de Desempeño Técnico, Cuestionario SUS y Cuestionario TAM. |
+
+---
+
+## 5. Texto Redactado Propuesto para la Sección 1.6.1 (Viabilidad Técnica)
+
+> *"El proyecto es técnicamente viable porque se sustenta en tecnologías de código abierto, maduras y ampliamente documentadas, ejecutadas en un entorno de desarrollo unificado en Python 3.12. Para la capa predictiva de Machine Learning y XAI se emplean scikit-learn, SHAP (TreeExplainer) y LIME, garantizando la reproducibilidad matemática de las atribuciones de riesgo. La arquitectura de Sistemas Multiagente (SMA) se implementa de manera nativa mediante un bus de eventos asíncrono y desacoplado que opera bajo los estándares internacionales de comunicación de agentes FIPA-ACL (Foundation for Intelligent Physical Agents - Agent Communication Language), estructurando a los agentes especializados (Ingestión, Preprocesamiento, Predictor, XAI, Recomendación y Alerta) en componentes modulares con responsabilidades únicas. La capa de presentación e interacción en tiempo real se desarrolla mediante un dashboard en Streamlit, lo que permite la visualización dinámica y transparente del riesgo intra-semestral sin demandar infraestructura de servidores comerciales ni licencias privativas. El entorno no requiere hardware especializado y puede operar localmente en equipos de cómputo universitarios convencionales a costo cero de despliegue."*
+

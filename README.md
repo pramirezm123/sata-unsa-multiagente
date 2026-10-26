@@ -12,7 +12,7 @@
 El **Sistema de Alerta Temprana Académica (SATA)** es una arquitectura de software inteligente orientada a la **predicción temprana y explicable del riesgo de reprobación académica** en asignaturas universitarias de educación superior.
 
 El sistema supera el tradicional "techo de precisión" de los modelos puramente históricos mediante una **estrategia predictiva en cascada basada en Checkpoints intra-semestrales**:
-- **CP0 (Semana 0 - Matrícula):** Predicción basada en antecedentes académicos y perfil de dificultad del docente asignado ($AUC=0.870$, Recall $\ge 85\%$).
+- **CP0 (Semana 0 - Matrícula):** Predicción basada en antecedentes académicos y perfil de dificultad del docente asignado ($AUC=0.870$, Recall calibrado $\ge 80\%$, obtenido $85.9\%$).
 - **CP1 (Semana 6 - Cierre Fase 1):** Insumo de Evaluación Continua 1 (`EC1`) y Examen Parcial 1 (`EP1`). **Reduce las falsas alarmas en $43.36\%$**, elevando la precisión al $27.7\%$ ($AUC=0.931$).
 - **CP2 (Semana 12 - Cierre Fase 2):** Insumo acumulado de Fase 1 y 2. **Elimina el $71.28\%$ de las falsas alarmas**, alcanzando una precisión del $42.2\%$ ($AUC=0.954$).
 - **CP3 (Semana 16 - Cierre Fase 3):** Evaluación previa a actas finales y examen sustitutorio ($AUC=0.995$, precisión $82.1\%$).
