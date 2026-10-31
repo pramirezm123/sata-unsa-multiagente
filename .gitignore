@@ -30,7 +30,10 @@ Información académica_Notas Parciales_2018-2025/
 scratch/
 .system_generated/
 *.log
+*.db
+.salt_secret
 
 # OS generated files
 .DS_Store
 Thumbs.db
+~$*
