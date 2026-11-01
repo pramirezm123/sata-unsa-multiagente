@@ -48,19 +48,19 @@ class AlertAgent(BaseAgent):
         if imposible == 1 or p >= 0.70:
             level = "CRÍTICO"
             color = "#D32F2F"  # Rojo oscuro
-            badge = "🔴 Alerta Crítica (Intervención Urgente)"
+            badge = "Alerta Crítica (Intervención Urgente)"
         elif p >= u:
             level = "ALTO"
             color = "#F57C00"  # Naranja
-            badge = "🟠 Alerta Temprana Activa (Riesgo Significativo)"
+            badge = "Alerta Temprana Activa (Riesgo Significativo)"
         elif p >= 0.20:
             level = "MEDIO"
             color = "#FBC02D"  # Amarillo/Ámbar
-            badge = "🟡 Seguimiento Preventivo (Riesgo Moderado)"
+            badge = "Seguimiento Preventivo (Riesgo Moderado)"
         else:
             level = "BAJO"
             color = "#388E3C"  # Verde
-            badge = "🟢 Desempeño Seguro (Sin Riesgo Aparente)"
+            badge = "Desempeño Seguro (Sin Riesgo Aparente)"
 
         return {
             "risk_level": level,

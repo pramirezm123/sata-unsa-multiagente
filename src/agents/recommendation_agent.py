@@ -49,23 +49,23 @@ class RecommendationAgent(BaseAgent):
             
             if imposible == 1:
                 recs.append(
-                    "⚠️ Situación Crítica: Con el sistema de evaluación ordinario, el estudiante no alcanza nota 11. "
+                    "Situación Crítica: Con el sistema de evaluación ordinario, el estudiante no alcanza nota 11. "
                     "Se debe activar orientación inmediata para preparar el Examen Sustitutorio al cierre de ciclo."
                 )
             elif nota_min > 14.0:
                 recs.append(
-                    f"🎯 Meta de Aprobación Alta: El alumno necesita un promedio de {nota_min:.1f} en las evaluaciones restantes. "
+                    f"Meta de Aprobación Alta: El alumno necesita un promedio de {nota_min:.1f} en las evaluaciones restantes. "
                     "Se recomienda agendar tutoría semanal y reforzar temas clave previo al siguiente examen."
                 )
             elif nota_min > 11.0:
                 recs.append(
-                    f"📌 Meta Moderada: Requiere un promedio de {nota_min:.1f} en lo pendiente para asegurar la aprobación."
+                    f"Meta Moderada: Requiere un promedio de {nota_min:.1f} en lo pendiente para asegurar la aprobación."
                 )
 
         # 2. Regla por inasistencia / ausencias
         if f.get("EC1_AUSENTE") == 1 or f.get("EP1_AUSENTE") == 1:
             recs.append(
-                "📋 Alerta de Inasistencia: Se registra ausencia en evaluaciones de Fase 1. "
+                "Alerta de Inasistencia: Se registra ausencia en evaluaciones de Fase 1. "
                 "Docente debe verificar motivos de inasistencia (justificación médica o problema de conectividad)."
             )
 
@@ -76,20 +76,20 @@ class RecommendationAgent(BaseAgent):
             ec1 = f.get("EC1_VAL", 11.0)
             if ec1 >= 14.0 and ep1 <= 7.0:
                 recs.append(
-                    "💡 Disparidad de Rendimiento: El estudiante presenta buen trabajo práctico (Continua) pero caída severa en el examen teórico. "
+                    "Disparidad de Rendimiento: El estudiante presenta buen trabajo práctico (Continua) pero caída severa en el examen teórico. "
                     "Se sugiere reforzar técnicas de estudio para pruebas escritas y resolución de ejercicios bajo límite de tiempo."
                 )
 
         # 4. Regla por dificultad histórica del curso o docente
         if f.get("DIFICULTAD_CURSO_HIST", 0) > 0.15:
             recs.append(
-                "📚 Asignatura de Alta Exigencia: Esta materia tiene una tasa histórica de reprobación superior al promedio. "
+                "Asignatura de Alta Exigencia: Esta materia tiene una tasa histórica de reprobación superior al promedio. "
                 "Priorizar al estudiante para talleres de nivelación de la escuela profesional."
             )
 
         # Si no hay alertas de riesgo
         if not is_alert and not recs:
-            recs.append("✅ Desempeño Satisfactorio: El estudiante mantiene un ritmo adecuado de aprobación. Mantener el seguimiento regular.")
+            recs.append("Desempeño Satisfactorio: El estudiante mantiene un ritmo adecuado de aprobación. Mantener el seguimiento regular.")
 
         return {
             "checkpoint": checkpoint,

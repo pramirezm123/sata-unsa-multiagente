@@ -288,9 +288,10 @@ def seed_initial_data():
 # ------------------ FUNCIONES DE NEGOCIO Y ACCESO A DATOS ------------------
 
 def authenticate_user(username: str, password_raw: str) -> Optional[Dict[str, Any]]:
-    """Autentica a un usuario y retorna su diccionario de perfil o None si es inválido."""
+    """Autentica a un usuario por username o por cui_hash y retorna su diccionario de perfil o None si es inválido."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM usuarios WHERE username = ?", (username.strip(),)).fetchone()
+    ident = username.strip()
+    row = conn.execute("SELECT * FROM usuarios WHERE username = ? OR cui_hash = ?", (ident, ident)).fetchone()
     conn.close()
     if not row:
         return None
@@ -299,7 +300,7 @@ def authenticate_user(username: str, password_raw: str) -> Optional[Dict[str, An
             "id": row["id"],
             "username": row["username"],
             "role": row["role"],
-            "cui_hash": row["cui_hash"]
+            "cui_hash": row["cui_hash"] or row["username"]
         }
     return None
 

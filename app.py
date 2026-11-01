@@ -65,7 +65,7 @@ st.markdown("""
         --tarjeta: #FFFFFF;
         --borde: #E2E8F0;
         --texto: #0F172A;
-        --texto-suave: #64748B;
+        --texto-suave: #475569;
         --azul-factor: #1E4E79;
         --riesgo-alto-bg: #FEF2F2;
         --riesgo-alto-borde: #EF4444;
@@ -83,7 +83,7 @@ st.markdown("""
     footer { display: none !important; }
     #MainMenu { visibility: hidden !important; }
 
-    /* Fondo general y contenedor */
+    /* Fondo general y contenedor en modo claro institucional */
     html, body, [data-testid="stAppViewContainer"] {
         background-color: var(--fondo) !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
@@ -97,12 +97,43 @@ st.markdown("""
         max-width: 1220px !important;
     }
 
-    /* Sidebar oficial */
+    /* Forzar contraste alto en todos los textos de la página principal */
+    [data-testid="stAppViewContainer"] p,
+    [data-testid="stAppViewContainer"] label,
+    [data-testid="stAppViewContainer"] .stMarkdown,
+    [data-testid="stAppViewContainer"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stAppViewContainer"] [data-testid="stWidgetLabel"] label,
+    [data-testid="stAppViewContainer"] .stRadio label p,
+    [data-testid="stAppViewContainer"] .stRadio label span,
+    [data-testid="stAppViewContainer"] .stRadio label {
+        color: var(--texto) !important;
+    }
+
+    /* Textos secundarios y captions con contraste estricto (Slate 600) */
+    .section-subtitle,
+    .sub-footer-row,
+    .sub-footer-row span,
+    .sub-metric-label,
+    .cui-mono,
+    .node-desc,
+    .action-date,
+    .fipa-time,
+    [data-testid="stAppViewContainer"] .stCaption,
+    [data-testid="stAppViewContainer"] .stCaption p {
+        color: var(--texto-suave) !important;
+    }
+
+    /* Sidebar oficial con degradado y textos blancos */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, var(--granate) 0%, var(--granate-oscuro) 100%) !important;
         border-right: 1px solid rgba(197, 155, 39, 0.3) !important;
     }
-    [data-testid="stSidebar"] * {
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] div,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
         color: #FFFFFF !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
     }
@@ -137,6 +168,9 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(122, 28, 32, 0.2) !important;
         transition: all .25s cubic-bezier(0.4,0,0.2,1) !important;
     }
+    button[kind="primary"] *, .stButton button[data-testid="baseButton-primary"] * {
+        color: #FFFFFF !important;
+    }
     button[kind="primary"]:hover {
         transform: translateY(-2px) !important;
         box-shadow: 0 6px 16px rgba(122, 28, 32, 0.35) !important;
@@ -149,6 +183,9 @@ st.markdown("""
         font-weight: 700 !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         transition: all .25s cubic-bezier(0.4,0,0.2,1) !important;
+    }
+    button[kind="secondary"] *, .stButton button:not([data-testid="baseButton-primary"]) * {
+        color: var(--granate) !important;
     }
     button[kind="secondary"]:hover, .stButton button:not([data-testid="baseButton-primary"]):hover {
         background: rgba(197, 155, 39, 0.08) !important;
@@ -183,13 +220,18 @@ st.markdown("""
     [data-baseweb="tab"] {
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         font-weight: 600 !important;
-        color: var(--texto-suave) !important;
         padding: 10px 16px !important;
         border-radius: 8px 8px 0 0 !important;
     }
+    [data-baseweb="tab"] p, [data-baseweb="tab"] span {
+        color: var(--texto-suave) !important;
+    }
     [data-baseweb="tab"][aria-selected="true"] {
-        color: var(--granate) !important;
         border-bottom: 3px solid var(--granate) !important;
+    }
+    [data-baseweb="tab"][aria-selected="true"] p,
+    [data-baseweb="tab"][aria-selected="true"] span {
+        color: var(--granate) !important;
         font-weight: 700 !important;
     }
 
@@ -198,9 +240,12 @@ st.markdown("""
         background: repeating-linear-gradient(135deg, rgba(255,255,255,0.035) 0, rgba(255,255,255,0.035) 10px, transparent 10px, transparent 20px), var(--granate-oscuro);
         border-radius: 12px 12px 0 0;
         padding: 24px 28px;
-        color: #FFFFFF;
+        color: #FFFFFF !important;
         position: relative;
         box-shadow: 0 8px 24px -4px rgba(90, 18, 21, 0.25);
+    }
+    .unsa-header-banner * {
+        color: #FFFFFF !important;
     }
     .unsa-banner-inner {
         display: flex;
@@ -216,7 +261,7 @@ st.markdown("""
         align-items: center;
         justify-content: center;
         background: rgba(197, 155, 39, 0.12);
-        color: var(--dorado-claro);
+        color: var(--dorado-claro) !important;
         font-weight: 800;
         font-size: 13px;
         letter-spacing: 0.1em;
@@ -228,19 +273,19 @@ st.markdown("""
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.14em;
-        color: var(--dorado-claro);
+        color: var(--dorado-claro) !important;
         margin-bottom: 4px;
     }
     .unsa-banner-title {
         font-size: 24px;
         font-weight: 800;
-        color: #FFFFFF;
+        color: #FFFFFF !important;
         margin: 0 0 4px 0;
         line-height: 1.2;
     }
     .unsa-banner-meta {
         font-size: 13px;
-        color: var(--azul-hielo);
+        color: var(--azul-hielo) !important;
         font-weight: 400;
     }
     .unsa-banner-fillet {
@@ -271,66 +316,60 @@ st.markdown("""
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.1em;
-        color: var(--dorado);
+        color: var(--dorado) !important;
         display: block;
         margin-bottom: 2px;
     }
     .section-title {
         font-size: 24px;
         font-weight: 800;
-        color: var(--granate-oscuro);
+        color: var(--granate-oscuro) !important;
         margin-top: 0;
         margin-bottom: 4px;
         line-height: 1.25;
     }
-    .section-subtitle {
-        font-size: 13px;
-        color: var(--texto-suave);
-        margin-bottom: 18px;
-    }
 
     /* Sub-métricas Mockup 2 */
     .sub-metric-card {
-        background: #FFFFFF;
-        border: 1px solid var(--borde);
-        border-top: 3px solid var(--dorado);
-        border-radius: 10px;
-        padding: 16px 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-        height: 100%;
+        background: #FFFFFF !important;
+        border: 1px solid var(--borde) !important;
+        border-top: 3px solid var(--dorado) !important;
+        border-radius: 10px !important;
+        padding: 16px 20px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important;
+        height: 100% !important;
     }
     .sub-metric-label {
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--texto-suave);
-        margin-bottom: 6px;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        color: var(--texto-suave) !important;
+        margin-bottom: 6px !important;
     }
     .sub-metric-val {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 26px;
-        font-weight: 700;
-        color: var(--granate-oscuro);
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 26px !important;
+        font-weight: 700 !important;
+        color: var(--granate-oscuro) !important;
     }
     .lema-box {
-        background-color: var(--azul-hielo);
-        border-radius: 10px;
-        padding: 16px 20px;
-        font-size: 13.5px;
-        color: var(--texto);
-        margin: 18px 0 14px 0;
-        line-height: 1.5;
+        background-color: var(--azul-hielo) !important;
+        border-radius: 10px !important;
+        padding: 16px 20px !important;
+        font-size: 13.5px !important;
+        color: var(--texto) !important;
+        margin: 18px 0 14px 0 !important;
+        line-height: 1.5 !important;
     }
     .lema-bold {
-        font-weight: 700;
-        color: var(--granate-oscuro);
+        font-weight: 700 !important;
+        color: var(--granate-oscuro) !important;
     }
     .sub-footer-row {
         display: flex;
         justify-content: space-between;
         font-size: 12px;
-        color: var(--texto-suave);
         margin-bottom: 24px;
     }
 
@@ -343,51 +382,51 @@ st.markdown("""
         margin-bottom: 16px;
     }
     .metric-card-risk.alto {
-        background-color: var(--riesgo-alto-bg);
-        border: 1.5px solid var(--riesgo-alto-borde);
+        background-color: var(--riesgo-alto-bg) !important;
+        border: 1.5px solid var(--riesgo-alto-borde) !important;
     }
     .metric-card-risk.alto .metric-card-label {
-        color: var(--riesgo-alto-texto);
+        color: var(--riesgo-alto-texto) !important;
         font-weight: 700;
         font-size: 11px;
         letter-spacing: 0.08em;
     }
     .metric-card-risk.alto .metric-card-value {
-        color: var(--riesgo-alto-texto);
+        color: var(--riesgo-alto-texto) !important;
         font-family: 'JetBrains Mono', monospace;
         font-size: 32px;
         font-weight: 700;
         margin-top: 4px;
     }
     .metric-card-risk.alerta {
-        background-color: var(--alerta-bg);
-        border: 1.5px solid var(--alerta-borde);
+        background-color: var(--alerta-bg) !important;
+        border: 1.5px solid var(--alerta-borde) !important;
     }
     .metric-card-risk.alerta .metric-card-label {
-        color: var(--alerta-texto);
+        color: var(--alerta-texto) !important;
         font-weight: 700;
         font-size: 11px;
         letter-spacing: 0.08em;
     }
     .metric-card-risk.alerta .metric-card-value {
-        color: var(--alerta-texto);
+        color: var(--alerta-texto) !important;
         font-family: 'JetBrains Mono', monospace;
         font-size: 32px;
         font-weight: 700;
         margin-top: 4px;
     }
     .metric-card-risk.bajo {
-        background-color: var(--riesgo-bajo-bg);
-        border: 1.5px solid var(--riesgo-bajo-borde);
+        background-color: var(--riesgo-bajo-bg) !important;
+        border: 1.5px solid var(--riesgo-bajo-borde) !important;
     }
     .metric-card-risk.bajo .metric-card-label {
-        color: var(--riesgo-bajo-texto);
+        color: var(--riesgo-bajo-texto) !important;
         font-weight: 700;
         font-size: 11px;
         letter-spacing: 0.08em;
     }
     .metric-card-risk.bajo .metric-card-value {
-        color: var(--riesgo-bajo-texto);
+        color: var(--riesgo-bajo-texto) !important;
         font-family: 'JetBrains Mono', monospace;
         font-size: 32px;
         font-weight: 700;
@@ -396,9 +435,9 @@ st.markdown("""
 
     /* Badges de riesgo */
     .badge-alto {
-        background: #FEF2F2;
-        border: 1px solid #EF4444;
-        color: #991B1B;
+        background: #FEF2F2 !important;
+        border: 1px solid #EF4444 !important;
+        color: #991B1B !important;
         font-weight: 700;
         font-size: 11px;
         border-radius: 99px;
@@ -408,9 +447,9 @@ st.markdown("""
         display: inline-block;
     }
     .badge-alerta {
-        background: #FFFBEB;
-        border: 1px solid #F59E0B;
-        color: #92400E;
+        background: #FFFBEB !important;
+        border: 1px solid #F59E0B !important;
+        color: #92400E !important;
         font-weight: 700;
         font-size: 11px;
         border-radius: 99px;
@@ -420,9 +459,9 @@ st.markdown("""
         display: inline-block;
     }
     .badge-bajo {
-        background: #F0FDF4;
-        border: 1px solid #22C55E;
-        color: #166534;
+        background: #F0FDF4 !important;
+        border: 1px solid #22C55E !important;
+        color: #166534 !important;
         font-weight: 700;
         font-size: 11px;
         border-radius: 99px;
@@ -443,17 +482,11 @@ st.markdown("""
     .student-list-row:last-child {
         border-bottom: none;
     }
-    .cui-mono {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
-        color: var(--texto-suave);
-        width: 150px;
-    }
     .student-name {
         flex-grow: 1;
         font-size: 14px;
         font-weight: 600;
-        color: var(--texto);
+        color: var(--texto) !important;
     }
 
     /* ---------------- MOCKUP 3: DETALLE CON EXPLICABILIDAD ---------------- */
@@ -492,7 +525,7 @@ st.markdown("""
         margin-bottom: 6px;
     }
     .factor-name {
-        color: var(--texto);
+        color: var(--texto) !important;
         font-weight: 600;
     }
     .factor-val-mono {
@@ -511,14 +544,17 @@ st.markdown("""
         border-radius: 5px;
     }
     .suggestion-box {
-        background-color: var(--alerta-bg);
-        border: 1px solid var(--alerta-borde);
-        border-radius: 10px;
-        padding: 16px 20px;
-        margin-top: 18px;
-        color: var(--alerta-texto);
-        font-size: 13.5px;
-        line-height: 1.5;
+        background-color: var(--alerta-bg) !important;
+        border: 1px solid var(--alerta-borde) !important;
+        border-radius: 10px !important;
+        padding: 16px 20px !important;
+        margin-top: 18px !important;
+        color: var(--alerta-texto) !important;
+        font-size: 13.5px !important;
+        line-height: 1.5 !important;
+    }
+    .suggestion-box b {
+        color: var(--alerta-texto) !important;
     }
 
     /* ---------------- MOCKUP 4: TRAZABILIDAD MULTIAGENTE ---------------- */
@@ -562,54 +598,46 @@ st.markdown("""
         margin-bottom: 8px;
     }
     .node-circle.solid {
-        background-color: var(--granate);
-        color: #FFFFFF;
+        background-color: var(--granate) !important;
+        color: #FFFFFF !important;
         box-shadow: 0 4px 10px rgba(122, 28, 32, 0.25);
     }
     .node-circle.active {
-        background-color: #FFFFFF;
-        border: 2.5px solid var(--dorado);
-        color: var(--granate);
+        background-color: #FFFFFF !important;
+        border: 2.5px solid var(--dorado) !important;
+        color: var(--granate) !important;
         box-shadow: 0 4px 12px rgba(197, 155, 39, 0.3);
     }
     .node-title {
         font-weight: 700;
-        color: var(--granate-oscuro);
+        color: var(--granate-oscuro) !important;
         font-size: 13.5px;
         margin-bottom: 2px;
     }
-    .node-desc {
-        color: var(--texto-suave);
-        font-size: 11.5px;
-        line-height: 1.3;
-    }
     .fipa-log-header {
-        background-color: var(--granate-oscuro);
+        background-color: var(--granate-oscuro) !important;
         border-radius: 10px 10px 0 0;
         padding: 12px 18px;
-        color: var(--dorado-claro);
+        color: var(--dorado-claro) !important;
         font-size: 11.5px;
         font-weight: 700;
         letter-spacing: 0.1em;
         font-family: 'JetBrains Mono', monospace;
     }
     .fipa-log-body {
-        background-color: #FFFFFF;
-        border: 1px solid var(--borde);
-        border-top: none;
-        border-radius: 0 0 10px 10px;
-        padding: 16px 20px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12.5px;
-        line-height: 1.8;
-        color: var(--texto);
-    }
-    .fipa-time {
-        color: var(--texto-suave);
+        background-color: #FFFFFF !important;
+        border: 1px solid var(--borde) !important;
+        border-top: none !important;
+        border-radius: 0 0 10px 10px !important;
+        padding: 16px 20px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 12.5px !important;
+        line-height: 1.8 !important;
+        color: var(--texto) !important;
     }
     .fipa-performative {
         font-weight: 700;
-        color: var(--granate);
+        color: var(--granate) !important;
     }
 
     /* ---------------- MOCKUP 5: SEGUIMIENTO Y PLAN TUTORÍA ---------------- */
@@ -635,23 +663,18 @@ st.markdown("""
         flex-shrink: 0;
     }
     .action-box.checked {
-        background-color: var(--granate);
-        color: #FFFFFF;
+        background-color: var(--granate) !important;
+        color: #FFFFFF !important;
     }
     .action-box.unchecked {
-        background-color: #FFFFFF;
-        border: 1.5px solid var(--dorado);
+        background-color: #FFFFFF !important;
+        border: 1.5px solid var(--dorado) !important;
     }
     .action-text {
         flex-grow: 1;
         font-size: 14px;
-        color: var(--texto);
+        color: var(--texto) !important;
         font-weight: 500;
-    }
-    .action-date {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px;
-        color: var(--texto-suave);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -743,8 +766,9 @@ if st.session_state["usuario"] is None:
                     if not cui_input or not pwd_input:
                         st.error("Por favor complete su CUI y contraseña.")
                     else:
-                        cui_h = hash_cui(cui_input)
-                        user = authenticate_user(cui_h, pwd_input)
+                        cui_clean = cui_input.strip()
+                        cui_h = hash_cui(cui_clean)
+                        user = authenticate_user(cui_clean, pwd_input) or authenticate_user(cui_h, pwd_input)
                         if user and user["role"] == "ESTUDIANTE":
                             st.session_state["usuario"] = user
                             st.rerun()
@@ -792,10 +816,12 @@ if st.session_state["usuario"] is None:
         """, unsafe_allow_html=True)
 
         if st.button("Entrar como Estudiante Demo (CUI: 20220638)", use_container_width=True):
-            user = authenticate_user(hash_cui("20220638"), "Alumno123*")
+            user = authenticate_user("20220638", "Alumno123*") or authenticate_user(hash_cui("20220638"), "Alumno123*")
             if user:
                 st.session_state["usuario"] = user
                 st.rerun()
+            else:
+                st.error("No se pudo iniciar sesión con el usuario demo de estudiante.")
 
         if st.button("Entrar como Docente / Tutor (docente_demo)", use_container_width=True):
             user = authenticate_user("docente_demo", "Docente123*")
@@ -885,10 +911,15 @@ if usuario is not None:
     # Sub-cabecera con saludo, 3 métricas con borde dorado y lema (Mockup 2)
     catalogo = get_all_courses()
     curso_activo = catalogo[0]["nombre"] if catalogo else "Estructuras de Datos"
+    
     if rol == "DOCENTE":
         resumen_curso = get_course_risk_summary(curso_activo, "2026-B")
         total_est = resumen_curso["total_alumnos"]
         tutorias_sem = resumen_curso["rojos"]
+    elif rol == "ESTUDIANTE":
+        mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
+        total_est = len(mis_mats)
+        tutorias_sem = 1
     else:
         total_est = 18
         tutorias_sem = 3
@@ -941,17 +972,18 @@ if usuario is not None:
         st.markdown('<h2 class="section-title">Panel de seguimiento</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Estimación de riesgo, no sentencia · datos reales del curso</p>', unsafe_allow_html=True)
 
-        # Selección de curso si es Docente / Autoridad
-        if rol in ["DOCENTE", "AUTORIDAD", "ADMIN"]:
+        if rol == "ESTUDIANTE":
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
+            rojos_cnt = 1 if mis_mats else 0
+            amarillos_cnt = 0
+            verdes_cnt = max(0, len(mis_mats) - 1)
+        else:
             cursos_nombres = [c["nombre"] for c in catalogo]
             curso_sel = st.selectbox("Asignatura a supervisar:", cursos_nombres, key="sel_curso_panel")
-        else:
-            curso_sel = "Estructuras de Datos"
-
-        resumen = get_course_risk_summary(curso_sel, "2026-B")
-        rojos_cnt = resumen["rojos"]
-        amarillos_cnt = resumen["amarillos"]
-        verdes_cnt = resumen["verdes"]
+            resumen = get_course_risk_summary(curso_sel, "2026-B")
+            rojos_cnt = resumen["rojos"]
+            amarillos_cnt = resumen["amarillos"]
+            verdes_cnt = resumen["verdes"]
 
         # Tres tarjetas de métricas con los colores del semáforo (Mockup 1)
         col_r1, col_r2, col_r3 = st.columns(3)
@@ -977,37 +1009,53 @@ if usuario is not None:
             </div>
             """, unsafe_allow_html=True)
 
-        # Lista de estudiantes (Mockup 1)
+        # Lista de estudiantes o cursos del estudiante (Mockup 1)
         st.markdown('<div class="unsa-card" style="padding: 14px 24px;">', unsafe_allow_html=True)
-        alumnos_lista = get_course_students_table(curso_sel, "2026-B")
-
-        # Si aún no hay alumnos en el curso, se muestran los de demo de la base de datos
-        if not alumnos_lista:
-            alumnos_lista = [
-                {"id_mostrado": "7f3a...c91", "nombre": "Estudiante de ejemplo A", "semaforo": "ROJO", "matricula_id": 1, "probabilidad": 0.82},
-                {"id_mostrado": "2b9e...04d", "nombre": "Estudiante de ejemplo B", "semaforo": "AMARILLO", "matricula_id": 2, "probabilidad": 0.31},
-                {"id_mostrado": "c40d...a17", "nombre": "Estudiante de ejemplo C", "semaforo": "VERDE", "matricula_id": 3, "probabilidad": 0.12}
-            ]
-
-        for al in alumnos_lista:
-            cui_txt = al.get("id_mostrado", "7f3a...c91")
-            nom_txt = al.get("nombre", f"Estudiante ({al.get('seccion', 'Sec. A')})")
-            sem_tag = al.get("semaforo", "ROJO")
-
-            if sem_tag == "ROJO":
-                badge_html = '<span class="badge-alto">ALTO</span>'
-            elif sem_tag == "AMARILLO":
-                badge_html = '<span class="badge-alerta">ALERTA</span>'
+        
+        if rol == "ESTUDIANTE":
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
+            if not mis_mats:
+                st.info("No tiene asignaturas inscritas aún. Utilice la opción 'Inscribir Asignatura' en el menú lateral.")
             else:
-                badge_html = '<span class="badge-bajo">BAJO</span>'
+                for idx, m in enumerate(mis_mats):
+                    p_rec = get_latest_prediction(m["id"])
+                    sem_tag = p_rec.get("semaforo", "ROJO" if idx == 0 else "VERDE")
+                    badge_html = '<span class="badge-alto">ALTO</span>' if sem_tag == "ROJO" else ('<span class="badge-alerta">ALERTA</span>' if sem_tag == "AMARILLO" else '<span class="badge-bajo">BAJO</span>')
+                    st.markdown(f"""
+                    <div class="student-list-row">
+                        <span class="cui-mono">Sec. {m['seccion']} · {m['semestre']}</span>
+                        <span class="student-name">{m['curso']} (Prof. {m['docente']})</span>
+                        {badge_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            alumnos_lista = get_course_students_table(curso_sel, "2026-B")
+            if not alumnos_lista:
+                alumnos_lista = [
+                    {"id_mostrado": "7f3a...c91", "nombre": "Estudiante de ejemplo A", "semaforo": "ROJO", "matricula_id": 1, "probabilidad": 0.82},
+                    {"id_mostrado": "2b9e...04d", "nombre": "Estudiante de ejemplo B", "semaforo": "AMARILLO", "matricula_id": 2, "probabilidad": 0.31},
+                    {"id_mostrado": "c40d...a17", "nombre": "Estudiante de ejemplo C", "semaforo": "VERDE", "matricula_id": 3, "probabilidad": 0.12}
+                ]
 
-            st.markdown(f"""
-            <div class="student-list-row">
-                <span class="cui-mono">CUI {cui_txt}</span>
-                <span class="student-name">{nom_txt}</span>
-                {badge_html}
-            </div>
-            """, unsafe_allow_html=True)
+            for al in alumnos_lista:
+                cui_txt = al.get("id_mostrado", "7f3a...c91")
+                nom_txt = al.get("nombre", f"Estudiante ({al.get('seccion', 'Sec. A')})")
+                sem_tag = al.get("semaforo", "ROJO")
+
+                if sem_tag == "ROJO":
+                    badge_html = '<span class="badge-alto">ALTO</span>'
+                elif sem_tag == "AMARILLO":
+                    badge_html = '<span class="badge-alerta">ALERTA</span>'
+                else:
+                    badge_html = '<span class="badge-bajo">BAJO</span>'
+
+                st.markdown(f"""
+                <div class="student-list-row">
+                    <span class="cui-mono">CUI {cui_txt}</span>
+                    <span class="student-name">{nom_txt}</span>
+                    {badge_html}
+                </div>
+                """, unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1015,11 +1063,10 @@ if usuario is not None:
         b_c1, b_c2, _ = st.columns([1.5, 1.5, 3])
         with b_c1:
             if st.button("Programar tutoría", type="primary", use_container_width=True):
-                st.success("Acción registrada: Notificación enviada al estudiante en el canal institucional.")
+                st.success("Acción registrada: Notificación enviada al canal institucional.")
         with b_c2:
             if st.button("Ver explicación", use_container_width=True):
-                st.session_state["nav_override"] = "Detalle con explicabilidad"
-                st.info("Consulte la pestaña 'Detalle con explicabilidad' en el menú lateral para ver el desglose SHAP.")
+                st.info("Abra la pestaña 'Detalle con explicabilidad' en el menú lateral para consultar el desglose SHAP.")
 
 
     # =========================================================================
@@ -1031,10 +1078,16 @@ if usuario is not None:
         st.markdown('<p class="section-subtitle">Factores explicativos SHAP y sugerencia generada por el Agente Tutor</p>', unsafe_allow_html=True)
 
         # Buscar última predicción real o datos de referencia
-        cursos_nombres = [c["nombre"] for c in catalogo]
-        c_act = cursos_nombres[0] if cursos_nombres else "Estructuras de Datos"
-        pred_rec = get_latest_prediction(1) or {
-            "probabilidad": 0.82,
+        if rol == "ESTUDIANTE":
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
+            mat_id_act = mis_mats[0]["id"] if mis_mats else 1
+            cui_tag = f"CUI {usuario['cui_hash'][:4]}...{usuario['cui_hash'][-3:]}"
+        else:
+            mat_id_act = 1
+            cui_tag = "CUI 7f3a...c91"
+
+        pred_rec = get_latest_prediction(mat_id_act) or {
+            "probabilidad": 0.78,
             "semaforo": "ROJO",
             "checkpoint": "CP1",
             "top_factors": [
@@ -1047,7 +1100,7 @@ if usuario is not None:
             ]
         }
 
-        p_val = pred_rec.get("probabilidad", 0.82)
+        p_val = pred_rec.get("probabilidad", 0.78)
         p_pct = p_val * 100
         sem_tag = pred_rec.get("semaforo", "ROJO")
 
@@ -1056,7 +1109,7 @@ if usuario is not None:
         # Columna Izquierda (Mockup 3: 230px aprox.)
         with col_izq:
             st.markdown('<div class="unsa-card" style="text-align: center;">', unsafe_allow_html=True)
-            st.markdown('<div class="cui-mono" style="margin: 0 auto 10px auto;">CUI 7f3a...c91</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="cui-mono" style="margin: 0 auto 10px auto;">{cui_tag}</div>', unsafe_allow_html=True)
             st.markdown(render_circular_gauge_svg(p_pct), unsafe_allow_html=True)
 
             if sem_tag == "ROJO":
@@ -1228,7 +1281,7 @@ if usuario is not None:
             ax.spines['right'].set_visible(False)
             ax.spines['left'].set_color('#E2E8F0')
             ax.spines['bottom'].set_color('#E2E8F0')
-            ax.tick_params(colors='#64748B', labelsize=10)
+            ax.tick_params(colors='#475569', labelsize=10)
             ax.grid(axis='y', linestyle=':', alpha=0.5, color='#E2E8F0')
             plt.tight_layout()
             st.pyplot(fig)

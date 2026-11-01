@@ -44,7 +44,10 @@ class CoordinatorAgent(BaseAgent):
 
         # 1. Solicitar a IngestionAgent
         self.send("IngestionAgent", "REQUEST", {"action": "INGEST", "payload": raw_payload}, conv_id)
-        msg_ingest = self.ingestion.receive()
+        req_ingest = self.ingestion.receive()
+        if req_ingest:
+            self.ingestion.handle_message(req_ingest)
+        msg_ingest = self.receive()
         if not msg_ingest or msg_ingest.performative == "FAILURE":
             return {"status": "ERROR", "errors": msg_ingest.content.get("errors", ["Error en ingestión"]) if msg_ingest else ["Timeout"]}
         
@@ -52,7 +55,10 @@ class CoordinatorAgent(BaseAgent):
 
         # 2. Solicitar a PreprocessingAgent
         self.send("PreprocessingAgent", "REQUEST", {"action": "PREPROCESS", "data": clean_data}, conv_id)
-        msg_prep = self.preprocessing.receive()
+        req_prep = self.preprocessing.receive()
+        if req_prep:
+            self.preprocessing.handle_message(req_prep)
+        msg_prep = self.receive()
         prep_data = msg_prep.content
 
         # 3. Solicitar a PredictorAgent
@@ -61,7 +67,10 @@ class CoordinatorAgent(BaseAgent):
             "features": prep_data["features"],
             "checkpoint": prep_data["checkpoint"]
         }, conv_id)
-        msg_pred = self.predictor.receive()
+        req_pred = self.predictor.receive()
+        if req_pred:
+            self.predictor.handle_message(req_pred)
+        msg_pred = self.receive()
         pred_data = msg_pred.content
 
         # 4. Solicitar a XaiAgent
@@ -71,7 +80,10 @@ class CoordinatorAgent(BaseAgent):
             "checkpoint": pred_data["checkpoint"],
             "features_used": pred_data["features_used"]
         }, conv_id)
-        msg_xai = self.xai.receive()
+        req_xai = self.xai.receive()
+        if req_xai:
+            self.xai.handle_message(req_xai)
+        msg_xai = self.receive()
         xai_data = msg_xai.content
 
         # 5. Solicitar a RecommendationAgent
@@ -81,7 +93,10 @@ class CoordinatorAgent(BaseAgent):
             "pred_data": pred_data,
             "prep_data": prep_data
         }, conv_id)
-        msg_rec = self.recommendation.receive()
+        req_rec = self.recommendation.receive()
+        if req_rec:
+            self.recommendation.handle_message(req_rec)
+        msg_rec = self.receive()
         rec_data = msg_rec.content
 
         # 6. Solicitar a AlertAgent
@@ -92,7 +107,10 @@ class CoordinatorAgent(BaseAgent):
             "xai_data": xai_data,
             "rec_data": rec_data
         }, conv_id)
-        msg_alert = self.alert.receive()
+        req_alert = self.alert.receive()
+        if req_alert:
+            self.alert.handle_message(req_alert)
+        msg_alert = self.receive()
         alert_data = msg_alert.content
 
         return {
