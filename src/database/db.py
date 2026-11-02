@@ -5,11 +5,12 @@ Garantiza:
 - Modo WAL (Write-Ahead Logging) para concurrencia segura en Streamlit.
 - Tablas completas según Sección 8 de la especificación técnica.
 """
+import json
 import os
 import sqlite3
-import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
+
 from ..security.crypto import hash_cui, hash_password, verify_password
 
 DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "sata_unsa.db")
@@ -259,13 +260,15 @@ def seed_initial_data():
 
     # 3. Usuarios Demo Pre-sembrados
     now_str = datetime.now().isoformat()
+    cui_demo_1 = hash_cui("20220638")
+    cui_demo_2 = hash_cui("20190638")
     usuarios_demo = [
         ("admin", hash_password("Admin123*"), "ADMIN", None),
         ("docente_demo", hash_password("Docente123*"), "DOCENTE", None),
         ("tutor_epis", hash_password("Tutor123*"), "AUTORIDAD", None),
-        # Estudiante con CUI demo 20220638
-        ("20220638", hash_password("Alumno123*"), "ESTUDIANTE", hash_cui("20220638")),
-        ("20190638", hash_password("Alumno123*"), "ESTUDIANTE", hash_cui("20190638"))
+        # Estudiantes con CUI hash irreversible (cero CUI en claro)
+        (cui_demo_1, hash_password("Alumno123*"), "ESTUDIANTE", cui_demo_1),
+        (cui_demo_2, hash_password("Alumno123*"), "ESTUDIANTE", cui_demo_2)
     ]
     for u, p_hash, r, cui_h in usuarios_demo:
         cursor.execute("""
@@ -274,12 +277,53 @@ def seed_initial_data():
         """, (u, p_hash, r, cui_h, now_str))
 
     # Asegurar registro del estudiante demo en tabla estudiantes
-    for cui in ["20220638", "20190638"]:
-        c_hash = hash_cui(cui)
+    for c_hash in [cui_demo_1, cui_demo_2]:
         cursor.execute("""
         INSERT OR IGNORE INTO estudiantes (cui_hash, consentimiento_aceptado, comparte_con_tutor, fecha_registro)
         VALUES (?, 1, 1, ?)
         """, (c_hash, now_str))
+
+    # Perfil basal demo
+    cursor.execute("""
+    INSERT OR IGNORE INTO perfil_semestre 
+    (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
+    VALUES (?, '2026-B', 11.5, 1, 6, 4.0, 'DECLARADO', ?)
+    """, (cui_demo_1, now_str))
+
+    # Matrícula demo
+    cursor.execute("""
+    INSERT OR IGNORE INTO matriculas 
+    (id, cui_hash, semestre, curso, docente, seccion, peso_ec1, peso_ep1, peso_ec2, peso_ep2, peso_ec3, peso_ep3, es_repeticion, fecha_inscripcion)
+    VALUES (1, ?, '2026-B', 'ESTRUCTURAS DE DATOS Y ALGORITMOS', 'DOCENTE PRINCIPAL 1', 'A', 15, 15, 20, 20, 15, 15, 1, ?)
+    """, (cui_demo_1, now_str))
+
+    # Notas demo Fase 1
+    cursor.execute("""
+    INSERT OR IGNORE INTO notas (matricula_id, evaluacion, valor_num, es_ausente, fecha_registro)
+    VALUES (1, 'EC1', 9.0, 0, ?), (1, 'EP1', 8.0, 0, ?)
+    """, (now_str, now_str))
+
+    # Predicción y explicación demo
+    cursor.execute("""
+    INSERT OR IGNORE INTO predicciones 
+    (id, matricula_id, checkpoint, probabilidad, umbral, semaforo, meta_nota_min, promedio_acumulado, imposible_ordinario, fecha)
+    VALUES (1, 1, 'CP1', 0.78, 0.340, 'ROJO', 13.5, 8.5, 0, ?)
+    """, (now_str,))
+
+    top_factors_demo = json.dumps([
+        {"label": "Evaluación Continua 1", "value": 9.0, "impact": 0.28, "direction": "Riesgo"},
+        {"label": "Examen Parcial 1", "value": 8.0, "impact": 0.24, "direction": "Riesgo"},
+        {"label": "Índice de Rendimiento Acumulado (IRA)", "value": 11.5, "impact": 0.12, "direction": "Riesgo"},
+        {"label": "Carga de cursos matriculados", "value": 6, "impact": -0.05, "direction": "Protección"}
+    ])
+    recs_demo = json.dumps([
+        "Coordinar sesión de tutoría individualizada y reforzar conceptos de árboles y grafos.",
+        "Monitorear la entrega de prácticas calificadas en Evaluación Continua 2."
+    ])
+    cursor.execute("""
+    INSERT OR IGNORE INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+    VALUES (1, ?, ?, 0.96, ?)
+    """, (top_factors_demo, recs_demo, now_str))
 
     conn.commit()
     conn.close()
@@ -287,11 +331,15 @@ def seed_initial_data():
 
 # ------------------ FUNCIONES DE NEGOCIO Y ACCESO A DATOS ------------------
 
-def authenticate_user(username: str, password_raw: str) -> Optional[Dict[str, Any]]:
-    """Autentica a un usuario por username o por cui_hash y retorna su diccionario de perfil o None si es inválido."""
+def authenticate_user(username: str, password_raw: str) -> dict[str, Any] | None:
+    """Autentica a un usuario por username o por cui_hash (calculado al vuelo) y retorna su perfil."""
     conn = get_connection()
     ident = username.strip()
-    row = conn.execute("SELECT * FROM usuarios WHERE username = ? OR cui_hash = ?", (ident, ident)).fetchone()
+    ident_hash = hash_cui(ident)
+    row = conn.execute(
+        "SELECT * FROM usuarios WHERE username = ? OR cui_hash = ? OR username = ? OR cui_hash = ?",
+        (ident, ident, ident_hash, ident_hash)
+    ).fetchone()
     conn.close()
     if not row:
         return None
@@ -305,7 +353,7 @@ def authenticate_user(username: str, password_raw: str) -> Optional[Dict[str, An
     return None
 
 
-def register_student_user(cui_raw: str, password_raw: str) -> Tuple[bool, str]:
+def register_student_user(cui_raw: str, password_raw: str) -> tuple[bool, str]:
     """Registra una nueva cuenta de estudiante transformando el CUI en hash irreversible."""
     cui_clean = cui_raw.strip().upper()
     if len(cui_clean) < 6:
@@ -342,10 +390,10 @@ def register_student_user(cui_raw: str, password_raw: str) -> Tuple[bool, str]:
         return True, "Cuenta de estudiante registrada con éxito."
     except Exception as e:
         conn.close()
-        return False, f"Error al registrar: {str(e)}"
+        return False, f"Error al registrar: {e!s}"
 
 
-def get_student_info(cui_hash: str) -> Optional[Dict[str, Any]]:
+def get_student_info(cui_hash: str) -> dict[str, Any] | None:
     """Obtiene los datos de consentimiento de un estudiante por su hash."""
     conn = get_connection()
     row = conn.execute("SELECT * FROM estudiantes WHERE cui_hash = ?", (cui_hash,)).fetchone()
@@ -366,7 +414,7 @@ def update_student_consent(cui_hash: str, aceptado: bool, comparte_tutor: bool):
     conn.close()
 
 
-def get_student_profile(cui_hash: str, semestre: str = "2026-B") -> Optional[Dict[str, Any]]:
+def get_student_profile(cui_hash: str, semestre: str = "2026-B") -> dict[str, Any] | None:
     """Obtiene el perfil basal del estudiante para un semestre."""
     conn = get_connection()
     row = conn.execute("""
@@ -393,7 +441,7 @@ def save_student_profile(cui_hash: str, semestre: str, ira: float, repeticiones:
     return True
 
 
-def get_all_courses() -> List[Dict[str, Any]]:
+def get_all_courses() -> list[dict[str, Any]]:
     """Retorna la lista de cursos del catálogo oficial."""
     conn = get_connection()
     rows = conn.execute("SELECT * FROM catalogo_cursos ORDER BY nombre ASC").fetchall()
@@ -401,7 +449,7 @@ def get_all_courses() -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def get_all_teachers() -> List[str]:
+def get_all_teachers() -> list[str]:
     """Retorna la lista de docentes disponibles."""
     conn = get_connection()
     rows = conn.execute("SELECT nombre FROM catalogo_docentes ORDER BY nombre ASC").fetchall()
@@ -410,7 +458,7 @@ def get_all_teachers() -> List[str]:
 
 
 def enroll_course(cui_hash: str, semestre: str, curso: str, docente: str, 
-                  seccion: str, pesos: Dict[str, int], es_repeticion: int) -> int:
+                  seccion: str, pesos: dict[str, int], es_repeticion: int) -> int:
     """Inscribe un curso para el estudiante y retorna el ID de la matrícula."""
     conn = get_connection()
     now_str = datetime.now().isoformat()
@@ -432,7 +480,7 @@ def enroll_course(cui_hash: str, semestre: str, curso: str, docente: str,
     return mat_id
 
 
-def get_student_enrollments(cui_hash: str, semestre: str = "2026-B") -> List[Dict[str, Any]]:
+def get_student_enrollments(cui_hash: str, semestre: str = "2026-B") -> list[dict[str, Any]]:
     """Retorna las asignaturas matriculadas por el estudiante."""
     conn = get_connection()
     rows = conn.execute("""
@@ -444,7 +492,7 @@ def get_student_enrollments(cui_hash: str, semestre: str = "2026-B") -> List[Dic
     return [dict(r) for r in rows]
 
 
-def save_grade(matricula_id: int, evaluacion: str, valor: Optional[float], 
+def save_grade(matricula_id: int, evaluacion: str, valor: float | None, 
                es_ausente: bool, motivo: str = "Registro regular") -> bool:
     """Registra o actualiza una nota intra-semestral con auditoría de cambios."""
     conn = get_connection()
@@ -482,7 +530,7 @@ def save_grade(matricula_id: int, evaluacion: str, valor: Optional[float],
     return True
 
 
-def get_grades_for_enrollment(matricula_id: int) -> Dict[str, Dict[str, Any]]:
+def get_grades_for_enrollment(matricula_id: int) -> dict[str, dict[str, Any]]:
     """Retorna un diccionario de notas { 'EC1': {'valor': 12.0, 'ausente': False}, ... }."""
     conn = get_connection()
     rows = conn.execute("SELECT * FROM notas WHERE matricula_id = ?", (matricula_id,)).fetchall()
@@ -498,9 +546,9 @@ def get_grades_for_enrollment(matricula_id: int) -> Dict[str, Dict[str, Any]]:
 
 
 def save_prediction_result(matricula_id: int, checkpoint: str, proba: float, 
-                           umbral: float, semaforo: str, meta_nota: Optional[float], 
+                           umbral: float, semaforo: str, meta_nota: float | None, 
                            promedio: float, imposible: bool, top_factors: list, 
-                           recs: list, fidelidad: Optional[float] = None) -> int:
+                           recs: list, fidelidad: float | None = None) -> int:
     """Guarda la predicción y las explicaciones XAI asociadas."""
     conn = get_connection()
     now_str = datetime.now().isoformat()
@@ -524,7 +572,7 @@ def save_prediction_result(matricula_id: int, checkpoint: str, proba: float,
     return pred_id
 
 
-def get_latest_prediction(matricula_id: int) -> Optional[Dict[str, Any]]:
+def get_latest_prediction(matricula_id: int) -> dict[str, Any] | None:
     """Obtiene la predicción más reciente de una matrícula junto con sus explicaciones."""
     conn = get_connection()
     row = conn.execute("""
@@ -543,7 +591,7 @@ def get_latest_prediction(matricula_id: int) -> Optional[Dict[str, Any]]:
     return d
 
 
-def get_prediction_history(matricula_id: int) -> List[Dict[str, Any]]:
+def get_prediction_history(matricula_id: int) -> list[dict[str, Any]]:
     """Obtiene el historial cronológico de predicciones por checkpoint para graficar evolución."""
     conn = get_connection()
     rows = conn.execute("""
@@ -556,7 +604,7 @@ def get_prediction_history(matricula_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def get_course_risk_summary(curso: str, semestre: str = "2026-B") -> Dict[str, Any]:
+def get_course_risk_summary(curso: str, semestre: str = "2026-B") -> dict[str, Any]:
     """Retorna el resumen agregado para docentes/autoridades de un curso."""
     conn = get_connection()
     rows = conn.execute("""
@@ -588,7 +636,7 @@ def get_course_risk_summary(curso: str, semestre: str = "2026-B") -> Dict[str, A
     }
 
 
-def get_course_students_table(curso: str, semestre: str = "2026-B") -> List[Dict[str, Any]]:
+def get_course_students_table(curso: str, semestre: str = "2026-B") -> list[dict[str, Any]]:
     """
     Retorna la lista de estudiantes para el docente/tutor.
     Si el estudiante NO dio consentimiento (opt-in comparte_con_tutor=0),
@@ -625,7 +673,7 @@ def get_course_students_table(curso: str, semestre: str = "2026-B") -> List[Dict
 
 
 def log_bus_message(request_id: str, emisor: str, receptor: str, 
-                    performativa: str, topico: str, contenido: Dict[str, Any], duracion_ms: float = 0.0):
+                    performativa: str, topico: str, contenido: dict[str, Any], duracion_ms: float = 0.0):
     """Registra en la base de datos cada mensaje FIPA-ACL para auditoría y monitor técnico."""
     conn = get_connection()
     now_str = datetime.now().isoformat()
@@ -637,7 +685,7 @@ def log_bus_message(request_id: str, emisor: str, receptor: str,
     conn.close()
 
 
-def get_recent_bus_messages(limit: int = 50) -> List[Dict[str, Any]]:
+def get_recent_bus_messages(limit: int = 50) -> list[dict[str, Any]]:
     """Obtiene los mensajes más recientes del bus FIPA-ACL."""
     conn = get_connection()
     rows = conn.execute("""
@@ -649,7 +697,7 @@ def get_recent_bus_messages(limit: int = 50) -> List[Dict[str, Any]]:
 
 
 def log_technical_metrics(request_id: str, checkpoint: str, lat_inf_ms: float, 
-                          lat_xai_ms: Optional[float], lat_total_ms: float, 
+                          lat_xai_ms: float | None, lat_total_ms: float, 
                           ram_mb: float, overhead_bus_ms: float):
     """Guarda las mediciones de latencia y recursos computacionales para el OBJ5."""
     conn = get_connection()
@@ -663,7 +711,7 @@ def log_technical_metrics(request_id: str, checkpoint: str, lat_inf_ms: float,
     conn.close()
 
 
-def get_technical_metrics_summary() -> Dict[str, Any]:
+def get_technical_metrics_summary() -> dict[str, Any]:
     """Calcula estadísticas descriptivas para la Ficha de Desempeño Técnico del OBJ5."""
     conn = get_connection()
     rows = conn.execute("""
@@ -696,7 +744,7 @@ def get_technical_metrics_summary() -> Dict[str, Any]:
     }
 
 
-def save_survey(id_anonimo: str, rol: str, tipo: str, respuestas: Dict[str, Any], puntaje: float):
+def save_survey(id_anonimo: str, rol: str, tipo: str, respuestas: dict[str, Any], puntaje: float):
     """Guarda una respuesta de cuestionario SUS o TAM."""
     conn = get_connection()
     now_str = datetime.now().isoformat()
@@ -708,7 +756,7 @@ def save_survey(id_anonimo: str, rol: str, tipo: str, respuestas: Dict[str, Any]
     conn.close()
 
 
-def get_surveys_stats(tipo: str) -> Dict[str, Any]:
+def get_surveys_stats(tipo: str) -> dict[str, Any]:
     """Calcula el promedio de puntajes SUS o TAM recopilados."""
     conn = get_connection()
     rows = conn.execute("SELECT puntaje_total FROM encuestas WHERE tipo_encuesta = ?", (tipo,)).fetchall()

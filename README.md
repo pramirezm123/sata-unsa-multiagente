@@ -82,7 +82,18 @@ cd sata-unsa-multiagente
 pip install -r requirements.txt
 ```
 
-### 4. Iniciar la Aplicación Multiagente
+### 4. Ejecutar la Suite de Pruebas y Cobertura (QA & Auditoría)
+El sistema cuenta con una batería completa de 78 pruebas automatizadas de extremo a extremo:
+```bash
+pytest --cov=src -v
+```
+Para ejecutar verificaciones de seguridad estática y calidad de código:
+```bash
+bandit -r src/
+ruff check src/ tests/ app.py
+```
+
+### 5. Iniciar la Aplicación Multiagente
 ```bash
 streamlit run app.py
 ```
@@ -90,8 +101,23 @@ La aplicación web se abrirá automáticamente en `http://localhost:8501`.
 
 ---
 
-## 🛡️ Privacidad y Consideraciones Éticas
+## 👥 Cuentas Demo y Roles del Sistema
 
-En cumplimiento de las normas de ética y confidencialidad universitaria:
-- El repositorio de código no contiene registros personales, nombres de estudiantes ni datos confidenciales.
-- Los modelos predictivos y prototipos interactivos operan con valores anonimizados mediante códigos hash criptográficos y datos agregados.
+Para evaluar los 4 perfiles del sistema en el entorno piloto local:
+- **Estudiante:** CUI `20220638` | Clave: `demo123` (consulta individual, consentimiento, simulador de sustitutorio y plan de tutoría).
+- **Docente / Tutor:** Usuario: `docente_epis` | Clave: `demo123` (panel de sección, semáforo, descarga de actas masivas y reportes PDF).
+- **Autoridad / Comité:** Usuario: `director_epis` | Clave: `demo123` (métricas agregadas por cohorte y curso, sin acceso a datos individuales).
+- **Administrador:** Usuario: `admin_epis` | Clave: `demo123` (gestión de catálogos, ponderaciones, calendario y monitor técnico).
+
+---
+
+## 🛡️ Privacidad por Diseño y Normativa UNSA
+
+En estricto cumplimiento del principio de **Estimación, no sentencia** y protección de datos personales:
+1. **Anonimización Criptográfica Irreversible:** El Código Único de Identificación (CUI) se convierte inmediatamente en HMAC-SHA256 con sal secreta de sistema (`.salt_secret`). Nunca se almacena ni se expone el CUI ni nombres en claro en la base de datos, logs del bus, PDFs de intervención ni interfaz gráfica.
+2. **Contraseñas Seguras:** PBKDF2-HMAC-SHA256 con 100,000 iteraciones y sal individual aleatoria por usuario.
+3. **Persistencia Transaccional:** SQLite en modo Write-Ahead Logging (`PRAGMA journal_mode=WAL`) con claves foráneas activas y registro de auditoría de calificaciones.
+4. **Reglamento Académico UNSA:**
+   - Examen sustitutorio reemplaza **únicamente** la nota más baja de los exámenes parciales ($\min(\text{EP1}, \text{EP2}, \text{EP3})$), **nunca** la evaluación continua (`EC`).
+   - Nota aprobatoria 11: redondeo matemático a partir de promedio $\ge 10.50$.
+   - Semáforo calibrado: Alerta Roja ante riesgo $\ge$ umbral calibrado o imposibilidad matemática; Alerta Preventiva (Banda Amarilla) en el rango $[0.75 \times \text{umbral}, \text{umbral}[$.

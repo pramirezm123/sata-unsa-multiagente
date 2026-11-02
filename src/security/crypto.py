@@ -4,11 +4,10 @@ Cumple estrictamente con el principio de 'Privacidad por Diseño':
 - Hashing de CUI con HMAC-SHA256 y sal/clave secreta del sistema (evita ataques de diccionario).
 - Hashing de contraseñas con PBKDF2-HMAC-SHA256 con sal aleatoria única por usuario.
 """
-import os
-import hmac
 import hashlib
+import hmac
+import os
 import secrets
-from typing import Tuple
 
 # Archivo de sal secreta del sistema (almacenado localmente, fuera del control de versiones público)
 SECRET_SALT_FILE = os.path.join(os.path.abspath(os.path.dirname(__file__)), ".salt_secret")
@@ -29,13 +28,15 @@ def _get_or_create_system_salt() -> bytes:
 SYSTEM_SALT = _get_or_create_system_salt()
 
 
-def hash_cui(cui: str) -> str:
+def hash_cui(cui: str, salt: bytes | None = None) -> str:
     """
     Genera un hash irreversible para el CUI utilizando HMAC-SHA256 con sal secreta.
     Retorna los primeros 16 caracteres hexadecimales (suficiente para colisiones en ~30,000 alumnos).
+    Permite parametrizar la sal opcionalmente para pruebas de variabilidad criptográfica.
     """
     clean_cui = str(cui).strip().upper()
-    h = hmac.new(SYSTEM_SALT, clean_cui.encode("utf-8"), hashlib.sha256)
+    active_salt = salt if salt is not None else SYSTEM_SALT
+    h = hmac.new(active_salt, clean_cui.encode("utf-8"), hashlib.sha256)
     return h.hexdigest()[:16].upper()
 
 

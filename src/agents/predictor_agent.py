@@ -4,12 +4,13 @@ Carga los modelos entrenados Random Forest para cada Checkpoint (CP0 a CP3)
 y genera la probabilidad calibrada de riesgo de reprobación.
 """
 import os
+from typing import Any
+
 import joblib
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional
-from .base_agent import BaseAgent
+
 from ..messaging.message import AgentMessage
+from .base_agent import BaseAgent
 
 HIST_NULOS = [
     "IRA_ACUM", "TASA_APROB_ACUM", "REPROBACIONES_PREVIAS",
@@ -60,7 +61,7 @@ class PredictorAgent(BaseAgent):
             else:
                 print(f"[ADVERTENCIA] Modelo {path} no encontrado.")
 
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         if message.performative == "REQUEST" and message.content.get("action") == "PREDICT":
             features = message.content.get("features", {})
             checkpoint = message.content.get("checkpoint", "CP0")
@@ -75,7 +76,7 @@ class PredictorAgent(BaseAgent):
             )
         return None
 
-    def predict(self, features: Dict[str, Any], checkpoint: str) -> Dict[str, Any]:
+    def predict(self, features: dict[str, Any], checkpoint: str) -> dict[str, Any]:
         """Calcula PROBA_CP0 para stacking y evalúa el modelo del checkpoint."""
         model_cp0 = self.models.get("CP0")
         target_model = self.models.get(checkpoint)

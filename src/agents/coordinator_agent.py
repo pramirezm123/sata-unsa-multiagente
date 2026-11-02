@@ -3,15 +3,16 @@ Agente Coordinador del Sistema Multiagente SATA-UNSA.
 Orquesta el ciclo de vida de la predicción, la interacción entre agentes
 y garantiza la trazabilidad del proceso sin acoplamiento.
 """
-from typing import Dict, Any
-from .base_agent import BaseAgent
+from typing import Any
+
 from ..messaging.bus import MessageBus
-from .ingestion_agent import IngestionAgent
-from .preprocessing_agent import PreprocessingAgent
-from .predictor_agent import PredictorAgent
-from .xai_agent import XaiAgent
-from .recommendation_agent import RecommendationAgent
 from .alert_agent import AlertAgent
+from .base_agent import BaseAgent
+from .ingestion_agent import IngestionAgent
+from .predictor_agent import PredictorAgent
+from .preprocessing_agent import PreprocessingAgent
+from .recommendation_agent import RecommendationAgent
+from .xai_agent import XaiAgent
 
 
 class CoordinatorAgent(BaseAgent):
@@ -30,7 +31,7 @@ class CoordinatorAgent(BaseAgent):
     def handle_message(self, message):
         return None
 
-    def analyze_student_risk(self, raw_payload: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_student_risk(self, raw_payload: dict[str, Any]) -> dict[str, Any]:
         """
         Ejecuta la secuencia orquestada completa:
         1. Ingestión y validación de datos
@@ -120,5 +121,5 @@ class CoordinatorAgent(BaseAgent):
             "preprocessing": prep_data,
             "xai": xai_data,
             "recommendation": rec_data,
-            "history": self.bus.get_history_summary()
+            "history": self.bus.get_history_summary(conv_id)
         }

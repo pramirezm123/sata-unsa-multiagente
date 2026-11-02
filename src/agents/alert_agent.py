@@ -3,9 +3,10 @@ Agente de Alertas y Notificación.
 Categoriza el nivel de riesgo en 4 estados operativos y emite fichas de alerta
 estructuradas para presentación en el dashboard institucional.
 """
-from typing import Dict, Any, Optional
-from .base_agent import BaseAgent
+from typing import Any
+
 from ..messaging.message import AgentMessage
+from .base_agent import BaseAgent
 
 
 class AlertAgent(BaseAgent):
@@ -13,7 +14,7 @@ class AlertAgent(BaseAgent):
     def __init__(self, agent_id: str, bus):
         super().__init__(agent_id, bus)
 
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         if message.performative == "REQUEST" and message.content.get("action") == "GENERATE_ALERT":
             pred = message.content.get("pred_data", {})
             prep = message.content.get("prep_data", {})
@@ -32,11 +33,11 @@ class AlertAgent(BaseAgent):
 
     def create_alert_package(
         self,
-        pred: Dict[str, Any],
-        prep: Dict[str, Any],
-        xai: Dict[str, Any],
-        rec: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        pred: dict[str, Any],
+        prep: dict[str, Any],
+        xai: dict[str, Any],
+        rec: dict[str, Any]
+    ) -> dict[str, Any]:
         """Estructura la ficha de alerta institucional."""
         p = pred.get("probability", 0.0)
         u = pred.get("threshold", 0.30)
@@ -44,32 +45,35 @@ class AlertAgent(BaseAgent):
         f = prep.get("features", {})
         imposible = f.get("IMPOSIBLE_APROBAR_F1", 0) or f.get("IMPOSIBLE_APROBAR_F2", 0)
 
-        # Categorización en 4 niveles operativos
-        if imposible == 1 or p >= 0.70:
-            level = "CRÍTICO"
-            color = "#D32F2F"  # Rojo oscuro
-            badge = "Alerta Crítica (Intervención Urgente)"
-        elif p >= u:
-            level = "ALTO"
-            color = "#F57C00"  # Naranja
-            badge = "Alerta Temprana Activa (Riesgo Significativo)"
-        elif p >= 0.20:
+        # Categorización calibrada del Semáforo con Banda Amarilla (0.75 * umbral)
+        th_yellow = round(0.75 * u, 4)
+        imposible_bool = bool(imposible == 1)
+
+        if imposible_bool or p >= u:
+            level = "CRÍTICO" if (imposible_bool or p >= 0.70) else "ALTO"
+            color = "#D32F2F" if level == "CRÍTICO" else "#EF4444"
+            badge = "Alerta Crítica (Intervención Urgente)" if level == "CRÍTICO" else "Alerta Temprana Activa (Riesgo Alto)"
+        elif p >= th_yellow:
             level = "MEDIO"
-            color = "#FBC02D"  # Amarillo/Ámbar
-            badge = "Seguimiento Preventivo (Riesgo Moderado)"
+            color = "#F59E0B"
+            badge = "Alerta Preventiva (Banda Amarilla - Riesgo Moderado)"
         else:
             level = "BAJO"
-            color = "#388E3C"  # Verde
-            badge = "Desempeño Seguro (Sin Riesgo Aparente)"
+            color = "#22C55E"
+            badge = "Desempeño Seguro (Riesgo Bajo)"
 
         return {
             "risk_level": level,
             "badge": badge,
             "color": color,
+            "probability": p,
             "probability_pct": round(p * 100.0, 2),
+            "threshold": u,
             "threshold_pct": round(u * 100.0, 2),
+            "threshold_yellow": th_yellow,
             "checkpoint": checkpoint,
-            "is_alert": pred.get("is_alert", False),
+            "is_alert": pred.get("is_alert", bool(p >= u or imposible_bool)),
+            "imposible_ordinario": imposible_bool,
             "top_factors": xai.get("top_factors", []),
             "recommendations": rec.get("actions", []),
             "meta_nota_min": round(f.get("NOTA_MIN_PEND_F1" if checkpoint == "CP1" else "NOTA_MIN_PEND_F2", 11.0), 2) if checkpoint in ["CP1", "CP2"] else None,

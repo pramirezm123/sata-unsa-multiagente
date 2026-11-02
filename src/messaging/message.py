@@ -3,7 +3,7 @@ Estructura de mensajes estandarizados para la arquitectura multiagente (SMA).
 Inspirado en el estándar FIPA-ACL (Agent Communication Language).
 """
 import time
-from typing import Dict, Any, Optional
+from typing import Any
 
 
 class AgentMessage:
@@ -13,8 +13,8 @@ class AgentMessage:
         sender: str,
         receiver: str,
         performative: str,
-        content: Dict[str, Any],
-        conversation_id: Optional[str] = None
+        content: dict[str, Any],
+        conversation_id: str | None = None
     ):
         self.sender = sender
         self.receiver = receiver
@@ -23,7 +23,7 @@ class AgentMessage:
         self.conversation_id = conversation_id or f"conv_{int(time.time() * 1000)}"
         self.timestamp = time.time()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "sender": self.sender,
             "receiver": self.receiver,

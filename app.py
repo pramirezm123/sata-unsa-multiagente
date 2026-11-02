@@ -7,38 +7,43 @@ Diseño sobrio, institucional y riguroso. Sin emojis en la interfaz.
 Tipografía: Plus Jakarta Sans (títulos y cuerpo) y JetBrains Mono (métricas, IDs y logs).
 Paleta: Variables CSS en :root (--granate, --dorado, --azul-hielo, etc.)
 """
+import datetime
 import os
 import sys
-import io
-import time
-import datetime
-import psutil
-import pandas as pd
-import numpy as np
+
 import matplotlib.pyplot as plt
+import pandas as pd
 import streamlit as st
 
 # Configuración de ruta base
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(BASE_DIR)
 
-from src.security.crypto import hash_cui
+from src.agents.coordinator_agent import CoordinatorAgent
 from src.database.db import (
-    authenticate_user, register_student_user, get_student_info, update_student_consent,
-    get_student_profile, save_student_profile, get_all_courses, get_all_teachers,
-    enroll_course, get_student_enrollments, save_grade, get_grades_for_enrollment,
-    save_prediction_result, get_latest_prediction, get_prediction_history,
-    get_course_risk_summary, get_course_students_table, log_bus_message,
-    get_recent_bus_messages, log_technical_metrics, get_technical_metrics_summary,
-    save_survey, get_surveys_stats
+    authenticate_user,
+    enroll_course,
+    get_all_courses,
+    get_all_teachers,
+    get_course_risk_summary,
+    get_course_students_table,
+    get_latest_prediction,
+    get_recent_bus_messages,
+    get_student_enrollments,
+    get_student_profile,
+    get_surveys_stats,
+    get_technical_metrics_summary,
+    register_student_user,
+    save_student_profile,
+    save_survey,
 )
 from src.messaging.bus import MessageBus
-from src.agents.coordinator_agent import CoordinatorAgent
-from src.services.academic_service import (
-    calcular_semaforo, calcular_simulacion_sustitutorio,
-    generar_plantilla_carga_masiva_csv, validar_y_procesar_acta_masiva
-)
 from src.reports.pdf_generator import generate_intervention_pdf
+from src.security.crypto import hash_cui
+from src.services.academic_service import (
+    generar_plantilla_carga_masiva_csv,
+    validar_y_procesar_acta_masiva,
+)
 
 # Configuración de página de Streamlit
 st.set_page_config(
@@ -1434,7 +1439,7 @@ if usuario is not None:
                         st.success(f"Se procesaron con éxito {len(procesados)} registros de estudiantes.")
                         st.dataframe(pd.DataFrame(procesados), use_container_width=True)
             except Exception as e:
-                st.error(f"Error al leer el archivo: {str(e)}")
+                st.error(f"Error al leer el archivo: {e!s}")
 
     elif nav_sel == "Métricas Institucionales":
         st.markdown('<span class="section-label">AUTORIDADES</span>', unsafe_allow_html=True)

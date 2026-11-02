@@ -3,9 +3,10 @@ Agente de Recomendación Pedagógica.
 Mapea los factores determinantes identificados por el Agente XAI (SHAP)
 hacia intervenciones académicas concretas y metas cuantitativas.
 """
-from typing import Dict, Any, Optional, List
-from .base_agent import BaseAgent
+from typing import Any
+
 from ..messaging.message import AgentMessage
+from .base_agent import BaseAgent
 
 
 class RecommendationAgent(BaseAgent):
@@ -13,7 +14,7 @@ class RecommendationAgent(BaseAgent):
     def __init__(self, agent_id: str, bus):
         super().__init__(agent_id, bus)
 
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         if message.performative == "REQUEST" and message.content.get("action") == "RECOMMEND":
             xai_data = message.content.get("xai_data", {})
             pred_data = message.content.get("pred_data", {})
@@ -31,12 +32,12 @@ class RecommendationAgent(BaseAgent):
 
     def generate_recommendations(
         self,
-        xai_data: Dict[str, Any],
-        pred_data: Dict[str, Any],
-        prep_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        xai_data: dict[str, Any],
+        pred_data: dict[str, Any],
+        prep_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Aplica reglas pedagógicas basadas en causas raíz explicadas por XAI."""
-        recs: List[str] = []
+        recs: list[str] = []
         checkpoint = pred_data.get("checkpoint", "CP0")
         is_alert = pred_data.get("is_alert", False)
         f = prep_data.get("features", {})
@@ -71,7 +72,6 @@ class RecommendationAgent(BaseAgent):
 
         # 3. Regla por disparidad Continua vs Examen (Tensión evaluativa)
         if checkpoint in ["CP1", "CP2"]:
-            prom_f1 = f.get("PROM_F1", 11.0)
             ep1 = f.get("EP1_VAL", 11.0)
             ec1 = f.get("EC1_VAL", 11.0)
             if ec1 >= 14.0 and ep1 <= 7.0:
@@ -86,6 +86,14 @@ class RecommendationAgent(BaseAgent):
                 "Asignatura de Alta Exigencia: Esta materia tiene una tasa histórica de reprobación superior al promedio. "
                 "Priorizar al estudiante para talleres de nivelación de la escuela profesional."
             )
+
+        # 5. Regla por factor dominante identificado por XAI
+        if is_alert and top_factors:
+            primer_factor = top_factors[0]
+            if primer_factor.get("direction") == "Riesgo" and len(recs) == 0:
+                recs.append(
+                    f"Atención en factor crítico: {primer_factor.get('label', 'Variable')} es el elemento que más eleva el riesgo estimado."
+                )
 
         # Si no hay alertas de riesgo
         if not is_alert and not recs:

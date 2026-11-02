@@ -3,10 +3,12 @@ Agente de Preprocesamiento y Análisis Académico.
 Valida notas, imputa valores faltantes según reglas oficiales y calcula
 las variables intra-semestrales exactas para los Checkpoints CP0 a CP3.
 """
+from typing import Any
+
 import numpy as np
-from typing import Dict, Any, Optional
-from .base_agent import BaseAgent
+
 from ..messaging.message import AgentMessage
+from .base_agent import BaseAgent
 
 
 class PreprocessingAgent(BaseAgent):
@@ -31,7 +33,7 @@ class PreprocessingAgent(BaseAgent):
             "PESO_EC3": 15.0, "PESO_EP3": 15.0
         }
 
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         if message.performative == "REQUEST" and message.content.get("action") == "PREPROCESS":
             raw_data = message.content.get("data", {})
             features_dict, checkpoint = self._compute_features(raw_data)
@@ -49,7 +51,7 @@ class PreprocessingAgent(BaseAgent):
             )
         return None
 
-    def _compute_features(self, data: Dict[str, Any]):
+    def _compute_features(self, data: dict[str, Any]):
         """Construye el vector de características dinámico y detecta el Checkpoint."""
         f = {}
         # 1. Variables históricas base
@@ -69,8 +71,8 @@ class PreprocessingAgent(BaseAgent):
             weights[comp] = float(w_raw) if (w_raw is not None and w_raw != "") else self.default_weights[f"PESO_{comp}"]
         
         sum_w = sum(weights.values()) or 100.0
-        for comp in weights:
-            f[f"PESO_{comp}"] = (weights[comp] / sum_w) * 100.0
+        for comp, w_val in weights.items():
+            f[f"PESO_{comp}"] = (w_val / sum_w) * 100.0
 
         # 3. Lectura de notas y estados
         evals = {}

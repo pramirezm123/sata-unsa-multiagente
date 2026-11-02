@@ -3,12 +3,13 @@ Agente de Explicabilidad (XAI).
 Genera explicaciones locales interpretables mediante SHAP TreeExplainer
 para descomponer las causas de riesgo de cada estudiante individual.
 """
-import shap
+from typing import Any
+
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional, List
-from .base_agent import BaseAgent
+import shap
+
 from ..messaging.message import AgentMessage
+from .base_agent import BaseAgent
 
 FEATURE_TRANSLATIONS = {
     "PROBA_CP0": "Riesgo histórico base (pre-semestre)",
@@ -58,7 +59,7 @@ class XaiAgent(BaseAgent):
                 self.explainers[checkpoint] = shap.TreeExplainer(model)
         return self.explainers.get(checkpoint)
 
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         if message.performative == "REQUEST" and message.content.get("action") == "EXPLAIN":
             input_vector = message.content.get("input_vector", {})
             checkpoint = message.content.get("checkpoint", "CP0")
@@ -74,7 +75,7 @@ class XaiAgent(BaseAgent):
             )
         return None
 
-    def explain(self, input_vector: Dict[str, Any], checkpoint: str, features_used: List[str]) -> Dict[str, Any]:
+    def explain(self, input_vector: dict[str, Any], checkpoint: str, features_used: list[str]) -> dict[str, Any]:
         """Calcula los valores SHAP locales de la instancia."""
         explainer = self._get_explainer(checkpoint)
         if not explainer:

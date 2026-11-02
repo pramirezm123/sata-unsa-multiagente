@@ -1,19 +1,19 @@
+from .alert_agent import AlertAgent
 from .base_agent import BaseAgent
 from .coordinator_agent import CoordinatorAgent
 from .ingestion_agent import IngestionAgent
-from .preprocessing_agent import PreprocessingAgent
 from .predictor_agent import PredictorAgent
-from .xai_agent import XaiAgent
+from .preprocessing_agent import PreprocessingAgent
 from .recommendation_agent import RecommendationAgent
-from .alert_agent import AlertAgent
+from .xai_agent import XaiAgent
 
 __all__ = [
+    "AlertAgent",
     "BaseAgent",
     "CoordinatorAgent",
     "IngestionAgent",
-    "PreprocessingAgent",
     "PredictorAgent",
-    "XaiAgent",
+    "PreprocessingAgent",
     "RecommendationAgent",
-    "AlertAgent"
+    "XaiAgent"
 ]

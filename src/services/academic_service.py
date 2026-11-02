@@ -7,13 +7,13 @@ Implementa:
 """
 import io
 import math
-import pandas as pd
+from typing import Any
+
 import numpy as np
-from typing import Dict, Any, List, Tuple, Optional
-from ..database.db import get_all_courses, get_all_teachers
+import pandas as pd
 
 
-def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario: bool = False) -> Dict[str, Any]:
+def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario: bool = False) -> dict[str, Any]:
     """
     Determina el color y nivel de alerta del semáforo:
     - ROJO: Probabilidad >= Umbral_CP o Imposible en ordinario.
@@ -31,17 +31,17 @@ def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario:
 
     if imposible_ordinario or probabilidad >= th:
         color_code = "ROJO"
-        badge_text = "🔴 ALERTA ROJA - Alto Riesgo Académico"
+        badge_text = "ALERTA ROJA - Alto Riesgo Académico"
         bg_hex = "#D32F2F"
         desc = "Se recomienda coordinar intervención tutorial y asesoría académica inmediata."
     elif probabilidad >= th_yellow:
         color_code = "AMARILLO"
-        badge_text = "🟡 ALERTA AMARILLA - Riesgo Medio / Observación Preventiva"
+        badge_text = "ALERTA AMARILLA - Riesgo Medio / Observación Preventiva"
         bg_hex = "#FBC02D"
         desc = "Estudiante en zona límite de riesgo; requiere refuerzo en las próximas evaluaciones."
     else:
         color_code = "VERDE"
-        badge_text = "🟢 SITUACIÓN REGULAR - Bajo Riesgo"
+        badge_text = "SITUACIÓN REGULAR - Bajo Riesgo"
         bg_hex = "#388E3C"
         desc = "Trayectoria académica favorable y dentro de los parámetros esperados de aprobación."
 
@@ -57,11 +57,11 @@ def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario:
 
 
 def calcular_simulacion_sustitutorio(
-    ec1: Optional[float], ep1: Optional[float],
-    ec2: Optional[float], ep2: Optional[float],
-    ec3: Optional[float], ep3: Optional[float],
-    pesos: Dict[str, int]
-) -> Dict[str, Any]:
+    ec1: float | None, ep1: float | None,
+    ec2: float | None, ep2: float | None,
+    ec3: float | None, ep3: float | None,
+    pesos: dict[str, int]
+) -> dict[str, Any]:
     """
     Calcula la viabilidad y nota mínima requerida en el Examen Sustitutorio.
     Regla confirmada UNSA-EPIS:
@@ -90,18 +90,19 @@ def calcular_simulacion_sustitutorio(
     w_ec3 = pesos.get("EC3", 15) / 100.0
     w_ep3 = pesos.get("EP3", 15) / 100.0
 
-    # Promedio ordinario final
-    prom_ordinario = (
+    # Promedio ordinario final con redondeo normativo a 2 decimales para evitar imprecisión de punto flotante
+    prom_ordinario_raw = (
         val_ec1 * w_ec1 + ep1 * w_ep1 +
         val_ec2 * w_ec2 + ep2 * w_ep2 +
         val_ec3 * w_ec3 + ep3 * w_ep3
     )
+    prom_ordinario = round(prom_ordinario_raw, 2)
 
     if prom_ordinario >= 10.5:
         return {
             "aplica": False,
             "ya_aprobo": True,
-            "promedio_ordinario": round(prom_ordinario, 2),
+            "promedio_ordinario": prom_ordinario,
             "mensaje": f"El estudiante ya se encuentra aprobado con promedio ordinario de {prom_ordinario:.2f}."
         }
 
@@ -165,7 +166,7 @@ def generar_plantilla_carga_masiva_csv() -> str:
     return output.getvalue()
 
 
-def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Valida fila por fila un archivo de carga masiva.
     - Filas con errores se agregan al reporte de errores sin interrumpir el lote.
@@ -200,6 +201,11 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> Tuple
         if not curso:
             errores_fila.append("Falta especificar el nombre de la asignatura.")
 
+        # Detección de inyección de fórmulas CSV (=, +, @, |)
+        for campo, val_str in [("ID_ESTUDIANTE", id_est), ("CURSO", curso), ("DOCENTE", docente), ("SECCION", seccion)]:
+            if val_str and val_str[0] in ["=", "+", "@", "|"]:
+                errores_fila.append(f"Contenido sospechoso de fórmula CSV no permitido en {campo}: {val_str}")
+
         # 2. Validar ponderaciones
         pesos = {}
         for p_key in ["POND_EC1", "POND_EP1", "POND_EC2", "POND_EP2", "POND_EC3", "POND_EP3"]:
@@ -219,23 +225,41 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> Tuple
             errores_fila.append(f"La suma de ponderaciones no es 100% (obtenido: {suma_pesos}%).")
 
         # 3. Validar variables basales
-        try:
-            ira = float(row.get("IRA", 12.0))
-            if ira < 0 or ira > 20:
-                errores_fila.append(f"IRA fuera de rango (0-20): {ira}")
-        except Exception:
+        raw_ira = row.get("IRA")
+        if pd.isna(raw_ira) or str(raw_ira).strip() == "":
             ira = 12.0
-            errores_fila.append(f"Formato numérico de IRA inválido: {row.get('IRA')}")
+        else:
+            try:
+                ira = float(raw_ira)
+                if ira < 0 or ira > 20:
+                    errores_fila.append(f"IRA fuera de rango (0-20): {ira}")
+            except Exception:
+                ira = 12.0
+                errores_fila.append(f"Formato numérico de IRA inválido: {raw_ira}")
 
-        try:
-            rep = int(float(row.get("REPETICIONES", 0)))
-        except Exception:
+        raw_rep = row.get("REPETICIONES")
+        if pd.isna(raw_rep) or str(raw_rep).strip() == "":
             rep = 0
+        else:
+            try:
+                rep = int(float(raw_rep))
+                if rep < 0:
+                    errores_fila.append(f"Repeticiones no puede ser negativo: {rep}")
+            except Exception:
+                rep = 0
+                errores_fila.append(f"Formato numérico de REPETICIONES inválido: {raw_rep}")
 
-        try:
-            carga = int(float(row.get("CREDITOS_MATRICULADOS", 6)))
-        except Exception:
+        raw_carga = row.get("CREDITOS_MATRICULADOS")
+        if pd.isna(raw_carga) or str(raw_carga).strip() == "":
             carga = 6
+        else:
+            try:
+                carga = int(float(raw_carga))
+                if carga <= 0:
+                    errores_fila.append(f"Créditos matriculados debe ser mayor a 0: {carga}")
+            except Exception:
+                carga = 6
+                errores_fila.append(f"Formato numérico de CREDITOS_MATRICULADOS inválido: {raw_carga}")
 
         # 4. Validar y parsear calificaciones
         eval_vals = {}
@@ -292,8 +316,9 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> Tuple
             if res_sma["status"] == "SUCCESS":
                 al = res_sma["alert"]
                 # Determinar semáforo de 3 colores con banda amarilla
+                prob_val = al.get("probability", al.get("probability_pct", 0.0) / 100.0)
                 semaf = calcular_semaforo(
-                    al["probability"], 
+                    prob_val, 
                     al["checkpoint"], 
                     al.get("imposible_ordinario", False)
                 )
@@ -321,7 +346,7 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> Tuple
             reporte_errores.append({
                 "fila": n_fila,
                 "id_estudiante": id_est,
-                "error": f"Excepción durante el análisis: {str(e)}"
+                "error": f"Excepción durante el análisis: {e!s}"
             })
 
     return filas_procesadas, reporte_errores

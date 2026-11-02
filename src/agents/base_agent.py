@@ -3,9 +3,10 @@ Clase base para todos los agentes de la arquitectura multiagente SATA-UNSA.
 Define el ciclo de vida y la interfaz de comunicación con el MessageBus.
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
-from ..messaging.message import AgentMessage
+from typing import Any
+
 from ..messaging.bus import MessageBus
+from ..messaging.message import AgentMessage
 
 
 class BaseAgent(ABC):
@@ -15,7 +16,7 @@ class BaseAgent(ABC):
         self.bus = bus
         self.bus.register_agent(agent_id)
 
-    def send(self, receiver: str, performative: str, content: Dict[str, Any], conversation_id: Optional[str] = None):
+    def send(self, receiver: str, performative: str, content: dict[str, Any], conversation_id: str | None = None):
         """Envía un mensaje a otro agente a través del bus."""
         msg = AgentMessage(
             sender=self.agent_id,
@@ -26,11 +27,10 @@ class BaseAgent(ABC):
         )
         self.bus.send(msg)
 
-    def receive(self, block: bool = True, timeout: Optional[float] = None) -> Optional[AgentMessage]:
+    def receive(self, block: bool = True, timeout: float | None = None) -> AgentMessage | None:
         """Recibe el siguiente mensaje de su buzón."""
         return self.bus.receive(self.agent_id, block=block, timeout=timeout)
 
     @abstractmethod
-    def handle_message(self, message: AgentMessage) -> Optional[AgentMessage]:
+    def handle_message(self, message: AgentMessage) -> AgentMessage | None:
         """Procesa un mensaje entrante y genera una respuesta si corresponde."""
-        pass
