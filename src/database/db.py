@@ -11,6 +11,11 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from ..security.access_control import (
+    AuthorizationError,
+    validate_matricula_ownership,
+    validate_student_access,
+)
 from ..security.crypto import hash_cui, hash_password, verify_password
 
 DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "sata_unsa.db")
@@ -414,8 +419,10 @@ def update_student_consent(cui_hash: str, aceptado: bool, comparte_tutor: bool):
     conn.close()
 
 
-def get_student_profile(cui_hash: str, semestre: str = "2026-B") -> dict[str, Any] | None:
-    """Obtiene el perfil basal del estudiante para un semestre."""
+def get_student_profile(cui_hash: str, semestre: str = "2026-B", current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Obtiene el perfil basal del estudiante para un semestre con control de acceso."""
+    if current_user:
+        validate_student_access(current_user, cui_hash)
     conn = get_connection()
     row = conn.execute("""
     SELECT * FROM perfil_semestre 
@@ -427,8 +434,10 @@ def get_student_profile(cui_hash: str, semestre: str = "2026-B") -> dict[str, An
 
 
 def save_student_profile(cui_hash: str, semestre: str, ira: float, repeticiones: int, 
-                         creditos: int, semestre_ingreso: float) -> bool:
-    """Guarda o actualiza el perfil basal del estudiante."""
+                         creditos: int, semestre_ingreso: float, current_user: dict[str, Any] | None = None) -> bool:
+    """Guarda o actualiza el perfil basal del estudiante con control de acceso."""
+    if current_user:
+        validate_student_access(current_user, cui_hash)
     conn = get_connection()
     now_str = datetime.now().isoformat()
     conn.execute("""
@@ -458,8 +467,11 @@ def get_all_teachers() -> list[str]:
 
 
 def enroll_course(cui_hash: str, semestre: str, curso: str, docente: str, 
-                  seccion: str, pesos: dict[str, int], es_repeticion: int) -> int:
+                  seccion: str, pesos: dict[str, int], es_repeticion: int,
+                  current_user: dict[str, Any] | None = None) -> int:
     """Inscribe un curso para el estudiante y retorna el ID de la matrícula."""
+    if current_user:
+        validate_student_access(current_user, cui_hash)
     conn = get_connection()
     now_str = datetime.now().isoformat()
     cursor = conn.cursor()
@@ -480,8 +492,10 @@ def enroll_course(cui_hash: str, semestre: str, curso: str, docente: str,
     return mat_id
 
 
-def get_student_enrollments(cui_hash: str, semestre: str = "2026-B") -> list[dict[str, Any]]:
-    """Retorna las asignaturas matriculadas por el estudiante."""
+def get_student_enrollments(cui_hash: str, semestre: str = "2026-B", current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Retorna las asignaturas matriculadas por el estudiante con validación de acceso."""
+    if current_user:
+        validate_student_access(current_user, cui_hash)
     conn = get_connection()
     rows = conn.execute("""
     SELECT * FROM matriculas 
@@ -493,9 +507,12 @@ def get_student_enrollments(cui_hash: str, semestre: str = "2026-B") -> list[dic
 
 
 def save_grade(matricula_id: int, evaluacion: str, valor: float | None, 
-               es_ausente: bool, motivo: str = "Registro regular") -> bool:
-    """Registra o actualiza una nota intra-semestral con auditoría de cambios."""
+               es_ausente: bool, motivo: str = "Registro regular",
+               current_user: dict[str, Any] | None = None) -> bool:
+    """Registra o actualiza una nota intra-semestral con auditoría de cambios y control de acceso."""
     conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
     cursor = conn.cursor()
     now_str = datetime.now().isoformat()
 
@@ -530,11 +547,21 @@ def save_grade(matricula_id: int, evaluacion: str, valor: float | None,
     return True
 
 
-def get_grades_for_enrollment(matricula_id: int) -> dict[str, dict[str, Any]]:
-    """Retorna un diccionario de notas { 'EC1': {'valor': 12.0, 'ausente': False}, ... }."""
+def get_grades_for_enrollment(matricula_id: int, current_user: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Retorna un diccionario de notas { 'EC1': {'valor': 12.0, 'ausente': False}, ... } con verificación de acceso."""
     conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
     rows = conn.execute("SELECT * FROM notas WHERE matricula_id = ?", (matricula_id,)).fetchall()
     conn.close()
+    res = {}
+    for r in rows:
+        res[r["evaluacion"]] = {
+            "valor": r["valor_num"],
+            "es_ausente": bool(r["es_ausente"]),
+            "fecha": r["fecha_registro"]
+        }
+    return res
     res = {}
     for r in rows:
         res[r["evaluacion"]] = {
@@ -572,9 +599,11 @@ def save_prediction_result(matricula_id: int, checkpoint: str, proba: float,
     return pred_id
 
 
-def get_latest_prediction(matricula_id: int) -> dict[str, Any] | None:
-    """Obtiene la predicción más reciente de una matrícula junto con sus explicaciones."""
+def get_latest_prediction(matricula_id: int, current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Obtiene la predicción más reciente de una matrícula junto con sus explicaciones con control de acceso."""
     conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
     row = conn.execute("""
     SELECT p.*, e.top_factors_json, e.recomendaciones_json, e.fidelidad_r
     FROM predicciones p
@@ -591,9 +620,11 @@ def get_latest_prediction(matricula_id: int) -> dict[str, Any] | None:
     return d
 
 
-def get_prediction_history(matricula_id: int) -> list[dict[str, Any]]:
-    """Obtiene el historial cronológico de predicciones por checkpoint para graficar evolución."""
+def get_prediction_history(matricula_id: int, current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Obtiene el historial cronológico de predicciones por checkpoint con control de acceso."""
     conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
     rows = conn.execute("""
     SELECT checkpoint, probabilidad, umbral, semaforo, fecha
     FROM predicciones
@@ -636,12 +667,19 @@ def get_course_risk_summary(curso: str, semestre: str = "2026-B") -> dict[str, A
     }
 
 
-def get_course_students_table(curso: str, semestre: str = "2026-B") -> list[dict[str, Any]]:
+def get_course_students_table(curso: str, semestre: str = "2026-B", current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """
     Retorna la lista de estudiantes para el docente/tutor.
     Si el estudiante NO dio consentimiento (opt-in comparte_con_tutor=0),
     sus datos individuales se anonimizan como 'ALUMNO_RESERVADO'.
+    Aplica aislamiento estricto: estudiantes y administradores no tienen acceso a notas individuales.
     """
+    if current_user:
+        if current_user.get("role") == "ESTUDIANTE":
+            raise AuthorizationError("Aislamiento estricto: Un estudiante no tiene autorización para listar otros alumnos del curso.")
+        if current_user.get("role") == "ADMIN":
+            raise AuthorizationError("Principio de Privacidad: El Administrador no tiene acceso a notas individuales de estudiantes.")
+
     conn = get_connection()
     rows = conn.execute("""
     SELECT m.id as matricula_id, m.cui_hash, m.seccion, e.comparte_con_tutor,
@@ -670,6 +708,24 @@ def get_course_students_table(curso: str, semestre: str = "2026-B") -> list[dict
             item["estado_optin"] = "Compartido con tutor"
         result.append(item)
     return result
+
+
+def get_bus_messages_for_student(cui_hash: str, limit: int = 8) -> list[dict[str, Any]]:
+    """
+    Obtiene los mensajes de trazabilidad del bus FIPA-ACL que pertenecen
+    estrictamente a las evaluaciones y solicitudes del estudiante autenticado.
+    Garantiza aislamiento total respecto a otros estudiantes.
+    """
+    conn = get_connection()
+    cui_pattern = f"%{cui_hash}%"
+    rows = conn.execute("""
+    SELECT id, request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp 
+    FROM mensajes_bus 
+    WHERE request_id LIKE ? OR contenido_json LIKE ?
+    ORDER BY id DESC LIMIT ?
+    """, (cui_pattern, cui_pattern, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def log_bus_message(request_id: str, emisor: str, receptor: str, 

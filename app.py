@@ -7,6 +7,7 @@ Diseño sobrio, institucional y riguroso. Sin emojis en la interfaz.
 Tipografía: Plus Jakarta Sans (títulos y cuerpo) y JetBrains Mono (métricas, IDs y logs).
 Paleta: Variables CSS en :root (--granate, --dorado, --azul-hielo, etc.)
 """
+import base64
 import datetime
 import os
 import sys
@@ -17,7 +18,8 @@ import streamlit as st
 
 # Configuración de ruta base
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(BASE_DIR)
+if BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
 
 from src.agents.coordinator_agent import CoordinatorAgent
 from src.database.db import (
@@ -25,9 +27,11 @@ from src.database.db import (
     enroll_course,
     get_all_courses,
     get_all_teachers,
+    get_bus_messages_for_student,
     get_course_risk_summary,
     get_course_students_table,
     get_latest_prediction,
+    get_prediction_history,
     get_recent_bus_messages,
     get_student_enrollments,
     get_student_profile,
@@ -49,8 +53,27 @@ from src.services.academic_service import (
 st.set_page_config(
     page_title="Alerta Académica | UNSA",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
+
+
+# =========================================================================
+# GESTIÓN DE RECURSOS E IMÁGENES INSTITUCIONALES
+# =========================================================================
+@st.cache_data
+def get_image_base64(rel_path: str) -> str:
+    """Carga y codifica una imagen institucional en base64 para embeber en HTML."""
+    path = os.path.join(BASE_DIR, rel_path)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+
+ESCUDO_UNSA_B64 = get_image_base64("assets/escudo_unsa.png")
+BANNER_FIPS_B64 = get_image_base64("assets/banner_fips.png")
+BANNER_EPIS_B64 = get_image_base64("assets/banner_epis.png")
+
 
 # =========================================================================
 # CAPA VISUAL: ESTILOS GLOBALES "UNSA GRANATE INSTITUCIONAL Y MODERN ACADEMIC"
@@ -83,10 +106,75 @@ st.markdown("""
         --riesgo-bajo-texto: #166534;
     }
 
-    /* Ocultar elementos nativos de Streamlit */
-    header[data-testid="stHeader"] { display: none !important; }
+    /* Streamlit Header transparente para mantener activo el botón del menú lateral */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        z-index: 999990 !important;
+        height: 3.2rem !important;
+    }
     footer { display: none !important; }
     #MainMenu { visibility: hidden !important; }
+
+    /* Control de colapso y reapertura del menú lateral */
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarHeader"] [data-testid="stSidebarCollapseButton"] {
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: flex !important;
+    }
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="stExpandSidebarButton"],
+    button[aria-label="Expand sidebar"] {
+        top: 0.6rem !important;
+        left: 0.8rem !important;
+        z-index: 999999 !important;
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] button,
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stExpandSidebarButton"],
+    button[aria-label="Expand sidebar"] {
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: flex !important;
+        background: var(--granate) !important;
+        color: #FFFFFF !important;
+        border: 1.5px solid var(--dorado) !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 10px rgba(122, 28, 32, 0.35) !important;
+        padding: 5px 9px !important;
+        transition: all .2s ease !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    [data-testid="stSidebarCollapseButton"] button:hover,
+    [data-testid="stExpandSidebarButton"]:hover,
+    button[aria-label="Expand sidebar"]:hover {
+        background: var(--granate-oscuro) !important;
+        border-color: var(--dorado-claro) !important;
+        transform: scale(1.05) !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg,
+    [data-testid="stExpandSidebarButton"] svg,
+    button[aria-label="Expand sidebar"] svg {
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
+        color: #FFFFFF !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    [data-testid="stSidebarCollapseButton"] button:hover {
+        background: var(--granate-oscuro) !important;
+        border-color: var(--dorado-claro) !important;
+        transform: scale(1.05) !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg {
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
+        color: #FFFFFF !important;
+    }
 
     /* Fondo general y contenedor en modo claro institucional */
     html, body, [data-testid="stAppViewContainer"] {
@@ -95,7 +183,7 @@ st.markdown("""
         color: var(--texto) !important;
     }
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 1.2rem !important;
         padding-bottom: 3rem !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
@@ -240,11 +328,21 @@ st.markdown("""
         font-weight: 700 !important;
     }
 
-    /* ---------------- MOCKUP 2: IDENTIDAD Y CABECERA ---------------- */
+    /* Estilos de Contenedor con Borde Nativo de Streamlit */
+    [data-testid="stVerticalBlockBorderWrapper"] > div {
+        background: var(--tarjeta) !important;
+        border: 1px solid var(--borde) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 8px 24px -6px rgba(122, 28, 32, 0.06) !important;
+        padding: 22px 24px !important;
+        margin-bottom: 16px !important;
+    }
+
+    /* Banner Institucional Oficial UNSA */
     .unsa-header-banner {
         background: repeating-linear-gradient(135deg, rgba(255,255,255,0.035) 0, rgba(255,255,255,0.035) 10px, transparent 10px, transparent 20px), var(--granate-oscuro);
         border-radius: 12px 12px 0 0;
-        padding: 24px 28px;
+        padding: 22px 28px;
         color: #FFFFFF !important;
         position: relative;
         box-shadow: 0 8px 24px -4px rgba(90, 18, 21, 0.25);
@@ -257,21 +355,11 @@ st.markdown("""
         align-items: center;
         gap: 20px;
     }
-    .unsa-escudo-circle {
-        width: 68px;
+    .unsa-escudo-img {
         height: 68px;
-        border-radius: 50%;
-        border: 2px solid var(--dorado);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(197, 155, 39, 0.12);
-        color: var(--dorado-claro) !important;
-        font-weight: 800;
-        font-size: 13px;
-        letter-spacing: 0.1em;
-        flex-shrink: 0;
-        text-align: center;
+        width: auto;
+        object-fit: contain;
+        filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
     }
     .unsa-banner-inst {
         font-size: 11px;
@@ -300,19 +388,19 @@ st.markdown("""
         margin-bottom: 22px;
     }
 
-    /* Tarjetas y contenedores */
+    /* Tarjetas y Contenedores */
     .unsa-card {
         background: var(--tarjeta);
         border: 1px solid var(--borde);
         border-radius: 12px;
-        box-shadow: 0 12px 24px -6px rgba(122,28,32,.08);
-        padding: 24px;
+        box-shadow: 0 10px 22px -6px rgba(122,28,32,.07);
+        padding: 22px 24px;
         transition: all .25s cubic-bezier(0.4,0,0.2,1);
         margin-bottom: 18px;
     }
     .unsa-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 16px 30px -8px rgba(122,28,32,.14);
+        transform: translateY(-2px);
+        box-shadow: 0 14px 28px -8px rgba(122,28,32,.12);
     }
 
     /* Títulos de sección */
@@ -378,7 +466,7 @@ st.markdown("""
         margin-bottom: 24px;
     }
 
-    /* ---------------- MOCKUP 1: PANEL DE SEGUIMIENTO ---------------- */
+    /* MOCKUP 1: Métricas de Semáforo */
     .metric-card-risk {
         border-radius: 12px;
         padding: 18px 22px;
@@ -481,7 +569,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 14px 4px;
+        padding: 13px 4px;
         border-bottom: 1px solid var(--borde);
     }
     .student-list-row:last-child {
@@ -494,7 +582,7 @@ st.markdown("""
         color: var(--texto) !important;
     }
 
-    /* ---------------- MOCKUP 3: DETALLE CON EXPLICABILIDAD ---------------- */
+    /* MOCKUP 3: Detalle con Explicabilidad */
     .unsa-circular-gauge {
         width: 140px;
         height: 140px;
@@ -562,7 +650,7 @@ st.markdown("""
         color: var(--alerta-texto) !important;
     }
 
-    /* ---------------- MOCKUP 4: TRAZABILIDAD MULTIAGENTE ---------------- */
+    /* MOCKUP 4: Trazabilidad Multiagente */
     .stepped-pipeline-container {
         position: relative;
         padding: 24px 10px 10px 10px;
@@ -645,7 +733,7 @@ st.markdown("""
         color: var(--granate) !important;
     }
 
-    /* ---------------- MOCKUP 5: SEGUIMIENTO Y PLAN TUTORÍA ---------------- */
+    /* MOCKUP 5: Seguimiento y Plan de Tutoría */
     .action-checklist-row {
         display: flex;
         align-items: center;
@@ -681,6 +769,29 @@ st.markdown("""
         color: var(--texto) !important;
         font-weight: 500;
     }
+
+    /* Responsividad en dispositivos móviles */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .unsa-banner-inner {
+            flex-direction: column;
+            text-align: center;
+            gap: 12px;
+        }
+        .stepped-nodes {
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .stepped-node {
+            width: 48%;
+        }
+        .stepped-line {
+            display: none;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -691,14 +802,16 @@ st.markdown("""
 def render_institutional_banner(facultad="Facultad de Ingeniería de Producción y Servicios",
                                 escuela="Escuela Profesional de Ingeniería de Sistemas",
                                 semestre="Semestre 2026-B"):
-    """Renderiza el banner superior institucional oficial UNSA (Mockup 2)."""
+    """Renderiza el banner superior institucional oficial UNSA con su escudo oficial."""
+    escudo_html = f'<img src="data:image/png;base64,{ESCUDO_UNSA_B64}" class="unsa-escudo-img" alt="Escudo UNSA" />' if ESCUDO_UNSA_B64 else '<div class="unsa-escudo-circle">UNSA</div>'
+
     st.markdown(f"""
     <div class="unsa-header-banner">
         <div class="unsa-banner-inner">
-            <div class="unsa-escudo-circle">UNSA</div>
+            {escudo_html}
             <div>
                 <div class="unsa-banner-inst">Universidad Nacional de San Agustín de Arequipa</div>
-                <div class="unsa-banner-title">Plataforma de Alerta Temprana de Riesgo Académico</div>
+                <div class="unsa-banner-title">SATA-UNSA · Plataforma de Alerta Temprana de Riesgo Académico</div>
                 <div class="unsa-banner-meta">{facultad} · {escuela} · {semestre}</div>
             </div>
         </div>
@@ -740,111 +853,131 @@ if "selected_student_mat" not in st.session_state:
 
 
 # =========================================================================
-# 1. PANTALLA DE ACCESO / INICIO DE SESIÓN (UNSA INSTITUCIONAL)
+# 1. PANTALLA DE ACCESO / INICIO DE SESIÓN (UNSA INSTITUCIONAL & STITCH)
 # =========================================================================
 if st.session_state["usuario"] is None:
     render_institutional_banner()
 
-    st.markdown("""
-    <div class="lema-box">
-        <span class="lema-bold">Principio de Estimación y Privacidad:</span> Este sistema genera estimaciones probabilísticas orientativas para apoyar la labor de tutoría y el autoaprendizaje. <b>Nunca guarda ni transmite nombres ni CUI en texto claro.</b> Toda identidad se procesa mediante un código criptográfico irreversible.
-    </div>
-    """, unsafe_allow_html=True)
+    col_info, col_auth = st.columns([1.1, 1], gap="medium")
 
-    col_login, col_demo = st.columns([3, 2])
+    with col_info:
+        with st.container(border=True):
+            st.markdown('<span class="section-label">IDENTIDAD INSTITUCIONAL & ÉTICA</span>', unsafe_allow_html=True)
+            st.markdown('<h3 class="section-title" style="font-size: 21px;">Arquitectura de Alerta Temprana</h3>', unsafe_allow_html=True)
 
-    with col_login:
-        st.markdown('<div class="unsa-card">', unsafe_allow_html=True)
-        tab_login, tab_reg = st.tabs(["Iniciar Sesión", "Registro de Estudiante"])
+            if BANNER_EPIS_B64:
+                st.markdown(f"""
+                <div style="margin: 12px 0 16px 0;">
+                    <img src="data:image/png;base64,{BANNER_EPIS_B64}" style="max-height: 48px; width: auto; border-radius: 6px;" alt="EPIS UNSA" />
+                </div>
+                """, unsafe_allow_html=True)
 
-        with tab_login:
-            st.markdown('<span class="section-label">AUTENTICACIÓN</span>', unsafe_allow_html=True)
-            st.markdown('<h3 class="section-title" style="font-size: 20px;">Acceso al Sistema</h3>', unsafe_allow_html=True)
-            tipo_usuario = st.radio("Tipo de usuario:", ["Estudiante", "Docente / Autoridad / Administrador"], horizontal=True)
+            st.markdown("""
+            <div class="lema-box" style="margin-top: 10px;">
+                <span class="lema-bold">Principio de Estimación y Privacidad:</span> Este sistema genera estimaciones probabilísticas orientativas para apoyar la labor de tutoría y el autoaprendizaje. <b>Nunca guarda ni transmite nombres ni CUI en texto claro.</b> Toda identidad se procesa mediante un código criptográfico irreversible HMAC-SHA256 con sal secreta institucional.
+            </div>
+            """, unsafe_allow_html=True)
 
-            if tipo_usuario == "Estudiante":
-                st.caption("Ingrese con su CUI (se convertirá en código hash al instante) y contraseña.")
-                cui_input = st.text_input("CUI del Estudiante:", max_chars=10, key="login_cui")
-                pwd_input = st.text_input("Contraseña:", type="password", key="login_pwd_est")
+            st.markdown("""
+            <div style="font-size: 13px; line-height: 1.6; color: var(--texto-suave);">
+                <b>Pilares de Seguridad y Normativa:</b>
+                <ul style="margin: 6px 0 12px 18px; padding: 0;">
+                    <li>Aislamiento estricto de datos por perfil de estudiante.</li>
+                    <li>PBKDF2-HMAC-SHA256 con 100,000 iteraciones para contraseñas.</li>
+                    <li>Explicabilidad transparente (XAI SHAP) y auditoría FIPA-ACL.</li>
+                    <li>Sustitutorio reemplaza únicamente el examen parcial más bajo.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
 
-                if st.button("Ingresar al Portal del Estudiante", type="primary", use_container_width=True):
-                    if not cui_input or not pwd_input:
-                        st.error("Por favor complete su CUI y contraseña.")
-                    else:
-                        cui_clean = cui_input.strip()
-                        cui_h = hash_cui(cui_clean)
-                        user = authenticate_user(cui_clean, pwd_input) or authenticate_user(cui_h, pwd_input)
-                        if user and user["role"] == "ESTUDIANTE":
+        # Tarjeta de Evaluación Rápida para el Jurado / Revisores
+        with st.container(border=True):
+            st.markdown('<span class="section-label">EVALUACIÓN DE TESIS</span>', unsafe_allow_html=True)
+            st.markdown('<h4 class="section-title" style="font-size: 18px; margin-bottom: 6px;">Acceso Rápido de Evaluación</h4>', unsafe_allow_html=True)
+            st.caption("Seleccione un perfil para evaluar inmediatamente las funcionalidades del sistema:")
+
+            if st.button("Entrar como Estudiante Demo (CUI: 20220638)", use_container_width=True):
+                user = authenticate_user("20220638", "Alumno123*") or authenticate_user(hash_cui("20220638"), "Alumno123*")
+                if user:
+                    st.session_state["usuario"] = user
+                    st.rerun()
+                else:
+                    st.error("No se pudo iniciar sesión con el usuario demo de estudiante.")
+
+            if st.button("Entrar como Docente / Tutor (docente_demo)", use_container_width=True):
+                user = authenticate_user("docente_demo", "Docente123*")
+                if user:
+                    st.session_state["usuario"] = user
+                    st.rerun()
+
+            if st.button("Entrar como Autoridad / Comité (tutor_epis)", use_container_width=True):
+                user = authenticate_user("tutor_epis", "Tutor123*")
+                if user:
+                    st.session_state["usuario"] = user
+                    st.rerun()
+
+            if st.button("Entrar como Administrador (admin)", use_container_width=True):
+                user = authenticate_user("admin", "Admin123*")
+                if user:
+                    st.session_state["usuario"] = user
+                    st.rerun()
+
+    with col_auth:
+        with st.container(border=True):
+            st.markdown('<span class="section-label">PORTAL DE ACCESO</span>', unsafe_allow_html=True)
+            st.markdown('<h3 class="section-title" style="font-size: 21px;">Autenticación Segura</h3>', unsafe_allow_html=True)
+
+            tab_login, tab_reg = st.tabs(["Iniciar Sesión", "Registro de Estudiante"])
+
+            with tab_login:
+                tipo_usuario = st.radio("Tipo de usuario:", ["Estudiante", "Docente / Autoridad / Administrador"], horizontal=True)
+
+                if tipo_usuario == "Estudiante":
+                    st.caption("Ingrese su CUI oficial (se convertirá en hash HMAC-SHA256 al instante).")
+                    cui_input = st.text_input("CUI del Estudiante:", max_chars=10, key="login_cui")
+                    pwd_input = st.text_input("Contraseña:", type="password", key="login_pwd_est")
+
+                    if st.button("Ingresar al Portal del Estudiante", type="primary", use_container_width=True):
+                        if not cui_input or not pwd_input:
+                            st.error("Por favor complete su CUI y contraseña.")
+                        else:
+                            cui_clean = cui_input.strip()
+                            cui_h = hash_cui(cui_clean)
+                            user = authenticate_user(cui_clean, pwd_input) or authenticate_user(cui_h, pwd_input)
+                            if user and user["role"] == "ESTUDIANTE":
+                                st.session_state["usuario"] = user
+                                st.rerun()
+                            else:
+                                st.error("Credenciales incorrectas o estudiante no registrado.")
+                else:
+                    user_input = st.text_input("Nombre de usuario:", key="login_user")
+                    pwd_input = st.text_input("Contraseña:", type="password", key="login_pwd_staff")
+
+                    if st.button("Ingresar al Sistema", type="primary", use_container_width=True):
+                        user = authenticate_user(user_input, pwd_input)
+                        if user and user["role"] != "ESTUDIANTE":
                             st.session_state["usuario"] = user
                             st.rerun()
                         else:
-                            st.error("Credenciales incorrectas o estudiante no registrado.")
-            else:
-                user_input = st.text_input("Nombre de usuario:", key="login_user")
-                pwd_input = st.text_input("Contraseña:", type="password", key="login_pwd_staff")
+                            st.error("Usuario o contraseña incorrectos.")
 
-                if st.button("Ingresar al Sistema", type="primary", use_container_width=True):
-                    user = authenticate_user(user_input, pwd_input)
-                    if user and user["role"] != "ESTUDIANTE":
-                        st.session_state["usuario"] = user
-                        st.rerun()
+            with tab_reg:
+                st.caption("Cree su cuenta con su CUI oficial. Su identidad quedará anonimizada criptográficamente.")
+                reg_cui = st.text_input("Ingrese su CUI oficial:", max_chars=8, key="reg_cui")
+                reg_pwd = st.text_input("Cree una contraseña segura:", type="password", key="reg_pwd")
+                reg_pwd2 = st.text_input("Confirme su contraseña:", type="password", key="reg_pwd2")
+
+                if st.button("Registrar Cuenta", type="primary", use_container_width=True):
+                    if reg_pwd != reg_pwd2:
+                        st.error("Las contraseñas no coinciden.")
+                    elif len(reg_pwd) < 6:
+                        st.error("La contraseña debe tener al menos 6 caracteres.")
                     else:
-                        st.error("Usuario o contraseña incorrectos.")
-
-        with tab_reg:
-            st.markdown('<span class="section-label">NUEVO INGRESO</span>', unsafe_allow_html=True)
-            st.markdown('<h3 class="section-title" style="font-size: 20px;">Crear Cuenta de Estudiante</h3>', unsafe_allow_html=True)
-            reg_cui = st.text_input("Ingrese su CUI oficial:", max_chars=8, key="reg_cui")
-            reg_pwd = st.text_input("Cree una contraseña segura:", type="password", key="reg_pwd")
-            reg_pwd2 = st.text_input("Confirme su contraseña:", type="password", key="reg_pwd2")
-
-            if st.button("Registrar Cuenta", use_container_width=True):
-                if reg_pwd != reg_pwd2:
-                    st.error("Las contraseñas no coinciden.")
-                elif len(reg_pwd) < 6:
-                    st.error("La contraseña debe tener al menos 6 caracteres.")
-                else:
-                    ok, msg = register_student_user(reg_cui, reg_pwd)
-                    if ok:
-                        st.success(msg + " Ya puede iniciar sesión.")
-                    else:
-                        st.error(msg)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_demo:
-        st.markdown("""
-        <div class="unsa-card">
-            <span class="section-label">EVALUACIÓN DE TESIS</span>
-            <h3 class="section-title" style="font-size: 20px;">Acceso Rápido de Evaluación</h3>
-            <p class="section-subtitle">Seleccione un perfil para evaluar las funcionalidades del sistema:</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("Entrar como Estudiante Demo (CUI: 20220638)", use_container_width=True):
-            user = authenticate_user("20220638", "Alumno123*") or authenticate_user(hash_cui("20220638"), "Alumno123*")
-            if user:
-                st.session_state["usuario"] = user
-                st.rerun()
-            else:
-                st.error("No se pudo iniciar sesión con el usuario demo de estudiante.")
-
-        if st.button("Entrar como Docente / Tutor (docente_demo)", use_container_width=True):
-            user = authenticate_user("docente_demo", "Docente123*")
-            if user:
-                st.session_state["usuario"] = user
-                st.rerun()
-
-        if st.button("Entrar como Autoridad / Comité (tutor_epis)", use_container_width=True):
-            user = authenticate_user("tutor_epis", "Tutor123*")
-            if user:
-                st.session_state["usuario"] = user
-                st.rerun()
-
-        if st.button("Entrar como Administrador (admin)", use_container_width=True):
-            user = authenticate_user("admin", "Admin123*")
-            if user:
-                st.session_state["usuario"] = user
-                st.rerun()
+                        ok, msg = register_student_user(reg_cui, reg_pwd)
+                        if ok:
+                            st.success(msg + " Ya puede iniciar sesión.")
+                        else:
+                            st.error(msg)
 
     st.stop()
 
@@ -858,12 +991,21 @@ if usuario is not None:
     fecha_hoy = datetime.date.today().strftime("%d/%m/%Y")
 
     # Sidebar oficial (Mockup 1)
-    st.sidebar.markdown("""
-    <div style="padding: 10px 0 16px 0;">
-        <div style="font-size: 19px; font-weight: 800; color: #FFFFFF; line-height: 1.2;">Alerta Académica</div>
-        <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--dorado-claro); margin-top: 3px;">UNIVERSIDAD NACIONAL DE SAN AGUSTÍN</div>
-    </div>
-    """, unsafe_allow_html=True)
+    if BANNER_EPIS_B64:
+        st.sidebar.markdown(f"""
+        <div style="padding: 10px 0 12px 0;">
+            <img src="data:image/png;base64,{BANNER_EPIS_B64}" style="max-height: 42px; width: auto; border-radius: 6px;" alt="EPIS UNSA" />
+            <div style="font-size: 17px; font-weight: 800; color: #FFFFFF; line-height: 1.2; margin-top: 8px;">Alerta Académica</div>
+            <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--dorado-claro); margin-top: 3px;">UNIVERSIDAD NACIONAL DE SAN AGUSTÍN</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.sidebar.markdown("""
+        <div style="padding: 10px 0 16px 0;">
+            <div style="font-size: 19px; font-weight: 800; color: #FFFFFF; line-height: 1.2;">Alerta Académica</div>
+            <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--dorado-claro); margin-top: 3px;">UNIVERSIDAD NACIONAL DE SAN AGUSTÍN</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     if rol == "ESTUDIANTE":
         cui_hash = usuario["cui_hash"]
@@ -901,13 +1043,13 @@ if usuario is not None:
 
     st.sidebar.markdown("---")
     if rol == "ESTUDIANTE":
-        st.sidebar.caption(f"ID Anonimizado: `{usuario['cui_hash'][:10]}...`")
+        st.sidebar.caption(f"ID Criptográfico: `{usuario['cui_hash'][:10]}...`")
     else:
         st.sidebar.caption(f"Usuario: `{usuario['username']}` ({rol})")
 
+    # Cierre de sesión seguro con limpieza total de memoria
     if st.sidebar.button("Cerrar Sesión", use_container_width=True):
-        st.session_state["usuario"] = None
-        st.session_state["selected_student_mat"] = None
+        st.session_state.clear()
         st.rerun()
 
     # Banner superior institucional (Mockup 2)
@@ -916,15 +1058,15 @@ if usuario is not None:
     # Sub-cabecera con saludo, 3 métricas con borde dorado y lema (Mockup 2)
     catalogo = get_all_courses()
     curso_activo = catalogo[0]["nombre"] if catalogo else "Estructuras de Datos"
-    
+
     if rol == "DOCENTE":
         resumen_curso = get_course_risk_summary(curso_activo, "2026-B")
         total_est = resumen_curso["total_alumnos"]
         tutorias_sem = resumen_curso["rojos"]
     elif rol == "ESTUDIANTE":
-        mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
+        mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
         total_est = len(mis_mats)
-        tutorias_sem = 1
+        tutorias_sem = 1 if mis_mats else 0
     else:
         total_est = 18
         tutorias_sem = 3
@@ -963,7 +1105,7 @@ if usuario is not None:
         <span class="lema-bold">Estimación, no sentencia.</span> El semáforo orienta la conversación de tutoría; la decisión siempre es del tutor y del estudiante.
     </div>
     <div class="sub-footer-row">
-        <span>Datos anonimizados con CUI hash</span>
+        <span>Datos anonimizados con CUI hash (HMAC-SHA256)</span>
         <span>Tesis de grado · Paolo Ramírez Melendres · Asesor: Dra. Eveling Castro Gutierrez</span>
     </div>
     """, unsafe_allow_html=True)
@@ -978,10 +1120,19 @@ if usuario is not None:
         st.markdown('<p class="section-subtitle">Estimación de riesgo, no sentencia · datos reales del curso</p>', unsafe_allow_html=True)
 
         if rol == "ESTUDIANTE":
-            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
-            rojos_cnt = 1 if mis_mats else 0
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
+            rojos_cnt = 0
             amarillos_cnt = 0
-            verdes_cnt = max(0, len(mis_mats) - 1)
+            verdes_cnt = 0
+            for m in mis_mats:
+                pred = get_latest_prediction(m["id"], current_user=usuario)
+                sem = pred.get("semaforo") if pred else "VERDE"
+                if sem == "ROJO":
+                    rojos_cnt += 1
+                elif sem == "AMARILLO":
+                    amarillos_cnt += 1
+                else:
+                    verdes_cnt += 1
         else:
             cursos_nombres = [c["nombre"] for c in catalogo]
             curso_sel = st.selectbox("Asignatura a supervisar:", cursos_nombres, key="sel_curso_panel")
@@ -1014,55 +1165,48 @@ if usuario is not None:
             </div>
             """, unsafe_allow_html=True)
 
-        # Lista de estudiantes o cursos del estudiante (Mockup 1)
-        st.markdown('<div class="unsa-card" style="padding: 14px 24px;">', unsafe_allow_html=True)
-        
-        if rol == "ESTUDIANTE":
-            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
-            if not mis_mats:
-                st.info("No tiene asignaturas inscritas aún. Utilice la opción 'Inscribir Asignatura' en el menú lateral.")
-            else:
-                for idx, m in enumerate(mis_mats):
-                    p_rec = get_latest_prediction(m["id"])
-                    sem_tag = p_rec.get("semaforo", "ROJO" if idx == 0 else "VERDE")
-                    badge_html = '<span class="badge-alto">ALTO</span>' if sem_tag == "ROJO" else ('<span class="badge-alerta">ALERTA</span>' if sem_tag == "AMARILLO" else '<span class="badge-bajo">BAJO</span>')
-                    st.markdown(f"""
-                    <div class="student-list-row">
-                        <span class="cui-mono">Sec. {m['seccion']} · {m['semestre']}</span>
-                        <span class="student-name">{m['curso']} (Prof. {m['docente']})</span>
-                        {badge_html}
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            alumnos_lista = get_course_students_table(curso_sel, "2026-B")
-            if not alumnos_lista:
-                alumnos_lista = [
-                    {"id_mostrado": "7f3a...c91", "nombre": "Estudiante de ejemplo A", "semaforo": "ROJO", "matricula_id": 1, "probabilidad": 0.82},
-                    {"id_mostrado": "2b9e...04d", "nombre": "Estudiante de ejemplo B", "semaforo": "AMARILLO", "matricula_id": 2, "probabilidad": 0.31},
-                    {"id_mostrado": "c40d...a17", "nombre": "Estudiante de ejemplo C", "semaforo": "VERDE", "matricula_id": 3, "probabilidad": 0.12}
-                ]
-
-            for al in alumnos_lista:
-                cui_txt = al.get("id_mostrado", "7f3a...c91")
-                nom_txt = al.get("nombre", f"Estudiante ({al.get('seccion', 'Sec. A')})")
-                sem_tag = al.get("semaforo", "ROJO")
-
-                if sem_tag == "ROJO":
-                    badge_html = '<span class="badge-alto">ALTO</span>'
-                elif sem_tag == "AMARILLO":
-                    badge_html = '<span class="badge-alerta">ALERTA</span>'
+        # Contenedor limpio para la lista de asignaturas o estudiantes (Mockup 1)
+        with st.container(border=True):
+            if rol == "ESTUDIANTE":
+                mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
+                if not mis_mats:
+                    st.info("No tiene asignaturas inscritas aún. Utilice la opción 'Inscribir Asignatura' en el menú lateral.")
                 else:
-                    badge_html = '<span class="badge-bajo">BAJO</span>'
+                    for idx, m in enumerate(mis_mats):
+                        p_rec = get_latest_prediction(m["id"], current_user=usuario)
+                        sem_tag = p_rec.get("semaforo", "ROJO" if idx == 0 else "VERDE") if p_rec else "VERDE"
+                        badge_html = '<span class="badge-alto">ALTO</span>' if sem_tag == "ROJO" else ('<span class="badge-alerta">ALERTA</span>' if sem_tag == "AMARILLO" else '<span class="badge-bajo">BAJO</span>')
+                        st.markdown(f"""
+                        <div class="student-list-row">
+                            <span class="cui-mono">Sec. {m['seccion']} · {m['semestre']}</span>
+                            <span class="student-name">{m['curso']} (Prof. {m['docente']})</span>
+                            {badge_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                alumnos_lista = get_course_students_table(curso_sel, "2026-B", current_user=usuario)
+                if not alumnos_lista:
+                    st.info(f"No hay registros de calificaciones para {curso_sel} en 2026-B.")
+                else:
+                    for al in alumnos_lista:
+                        cui_txt = al.get("id_mostrado", "7f3a...c91")
+                        nom_txt = al.get("nombre", f"Estudiante ({al.get('seccion', 'Sec. A')})")
+                        sem_tag = al.get("semaforo", "ROJO")
 
-                st.markdown(f"""
-                <div class="student-list-row">
-                    <span class="cui-mono">CUI {cui_txt}</span>
-                    <span class="student-name">{nom_txt}</span>
-                    {badge_html}
-                </div>
-                """, unsafe_allow_html=True)
+                        if sem_tag == "ROJO":
+                            badge_html = '<span class="badge-alto">ALTO</span>'
+                        elif sem_tag == "AMARILLO":
+                            badge_html = '<span class="badge-alerta">ALERTA</span>'
+                        else:
+                            badge_html = '<span class="badge-bajo">BAJO</span>'
 
-        st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div class="student-list-row">
+                            <span class="cui-mono">CUI {cui_txt}</span>
+                            <span class="student-name">{nom_txt}</span>
+                            {badge_html}
+                        </div>
+                        """, unsafe_allow_html=True)
 
         # Botones inferiores (Mockup 1)
         b_c1, b_c2, _ = st.columns([1.5, 1.5, 3])
@@ -1082,16 +1226,23 @@ if usuario is not None:
         st.markdown('<h2 class="section-title">¿Qué influyó en este resultado?</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Factores explicativos SHAP y sugerencia generada por el Agente Tutor</p>', unsafe_allow_html=True)
 
-        # Buscar última predicción real o datos de referencia
+        # Búsqueda de predicción con estricto control de acceso
         if rol == "ESTUDIANTE":
-            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B")
-            mat_id_act = mis_mats[0]["id"] if mis_mats else 1
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
+            if not mis_mats:
+                st.info("No tiene asignaturas inscritas para consultar. Inscríbase en 'Inscribir Asignatura'.")
+                st.stop()
+
+            # Selector exclusivo entre sus propias matrículas
+            mat_dict = {f"{m['curso']} (Sec. {m['seccion']})": m["id"] for m in mis_mats}
+            sel_curso = st.selectbox("Asignatura a consultar:", list(mat_dict.keys()), key="sel_mat_xai")
+            mat_id_act = mat_dict[sel_curso]
             cui_tag = f"CUI {usuario['cui_hash'][:4]}...{usuario['cui_hash'][-3:]}"
         else:
             mat_id_act = 1
             cui_tag = "CUI 7f3a...c91"
 
-        pred_rec = get_latest_prediction(mat_id_act) or {
+        pred_rec = get_latest_prediction(mat_id_act, current_user=usuario) or {
             "probabilidad": 0.78,
             "semaforo": "ROJO",
             "checkpoint": "CP1",
@@ -1109,68 +1260,65 @@ if usuario is not None:
         p_pct = p_val * 100
         sem_tag = pred_rec.get("semaforo", "ROJO")
 
-        col_izq, col_der = st.columns([1, 2])
+        col_izq, col_der = st.columns([1, 2], gap="medium")
 
-        # Columna Izquierda (Mockup 3: 230px aprox.)
+        # Columna Izquierda (Mockup 3: Medidor circular y badge)
         with col_izq:
-            st.markdown('<div class="unsa-card" style="text-align: center;">', unsafe_allow_html=True)
-            st.markdown(f'<div class="cui-mono" style="margin: 0 auto 10px auto;">{cui_tag}</div>', unsafe_allow_html=True)
-            st.markdown(render_circular_gauge_svg(p_pct), unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f'<div class="cui-mono" style="text-align: center; margin: 0 auto 10px auto;">{cui_tag}</div>', unsafe_allow_html=True)
+                st.markdown(render_circular_gauge_svg(p_pct), unsafe_allow_html=True)
 
-            if sem_tag == "ROJO":
-                st.markdown('<div style="margin: 12px 0;"><span class="badge-alto">RIESGO ALTO</span></div>', unsafe_allow_html=True)
-            elif sem_tag == "AMARILLO":
-                st.markdown('<div style="margin: 12px 0;"><span class="badge-alerta">ALERTA PREVENTIVA</span></div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div style="margin: 12px 0;"><span class="badge-bajo">RIESGO BAJO</span></div>', unsafe_allow_html=True)
+                if sem_tag == "ROJO":
+                    st.markdown('<div style="text-align: center; margin: 12px 0;"><span class="badge-alto">RIESGO ALTO</span></div>', unsafe_allow_html=True)
+                elif sem_tag == "AMARILLO":
+                    st.markdown('<div style="text-align: center; margin: 12px 0;"><span class="badge-alerta">ALERTA PREVENTIVA</span></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="text-align: center; margin: 12px 0;"><span class="badge-bajo">RIESGO BAJO</span></div>', unsafe_allow_html=True)
 
-            st.markdown("""
-            <div style="font-size: 13px; color: var(--texto-suave); margin-bottom: 14px;">
-                Probabilidad estimada de rezago<br>
-                <b>Semestre 2026-B · EPIS</b>
-            </div>
-            <div style="border-top: 2px solid var(--dorado); margin: 14px 0 10px 0;"></div>
-            """, unsafe_allow_html=True)
+                st.markdown("""
+                <div style="font-size: 13px; text-align: center; color: var(--texto-suave); margin-bottom: 14px;">
+                    Probabilidad estimada de rezago<br>
+                    <b>Semestre 2026-B · EPIS</b>
+                </div>
+                <div style="border-top: 2px solid var(--dorado); margin: 14px 0 10px 0;"></div>
+                """, unsafe_allow_html=True)
 
-            if st.button("Programar tutoría", key="btn_prog_tut_izq", use_container_width=True):
-                st.success("Tutoría programada en la agenda del docente.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                if st.button("Programar tutoría", key="btn_prog_tut_izq", use_container_width=True):
+                    st.success("Tutoría programada en la agenda del docente.")
 
         # Columna Derecha (Mockup 3: Barras SHAP y Sugerencia)
         with col_der:
-            st.markdown('<div class="unsa-card">', unsafe_allow_html=True)
+            with st.container(border=True):
+                factores = pred_rec.get("top_factors", [])
+                for f in factores:
+                    f_nombre = f.get("label", "Factor evaluado")
+                    val_raw = float(f.get("value", 0.0))
+                    es_riesgo = f.get("direction") == "Riesgo" or val_raw > 0
 
-            factores = pred_rec.get("top_factors", [])
-            for f in factores:
-                f_nombre = f.get("label", "Factor evaluado")
-                val_raw = float(f.get("value", 0.0))
-                es_riesgo = f.get("direction") == "Riesgo" or val_raw > 0
+                    bar_color = "var(--granate)" if es_riesgo else "var(--azul-factor)"
+                    signo = "+" if val_raw >= 0 else ""
+                    val_txt = f"{signo}{val_raw:.2f}"
+                    ancho_pct = min(100, int(abs(val_raw) * 150)) if abs(val_raw) <= 1.0 else min(100, int(abs(val_raw)))
 
-                bar_color = "var(--granate)" if es_riesgo else "var(--azul-factor)"
-                signo = "+" if val_raw >= 0 else ""
-                val_txt = f"{signo}{val_raw:.2f}"
-                ancho_pct = min(100, int(abs(val_raw) * 150)) if abs(val_raw) <= 1.0 else min(100, int(abs(val_raw)))
-
-                st.markdown(f"""
-                <div class="factor-bar-row">
-                    <div class="factor-label-row">
-                        <span class="factor-name">{f_nombre}</span>
-                        <span class="factor-val-mono" style="color: {bar_color};">{val_txt}</span>
+                    st.markdown(f"""
+                    <div class="factor-bar-row">
+                        <div class="factor-label-row">
+                            <span class="factor-name">{f_nombre}</span>
+                            <span class="factor-val-mono" style="color: {bar_color};">{val_txt}</span>
+                        </div>
+                        <div class="factor-bar-track">
+                            <div class="factor-bar-fill" style="width: {ancho_pct}%; background-color: {bar_color};"></div>
+                        </div>
                     </div>
-                    <div class="factor-bar-track">
-                        <div class="factor-bar-fill" style="width: {ancho_pct}%; background-color: {bar_color};"></div>
-                    </div>
+                    """, unsafe_allow_html=True)
+
+                # Leyenda (Mockup 3)
+                st.markdown("""
+                <div style="display: flex; gap: 20px; font-size: 12px; color: var(--texto-suave); margin-top: 18px;">
+                    <span><span style="color: var(--granate); font-weight: bold;">■</span> Aumenta el riesgo</span>
+                    <span><span style="color: var(--azul-factor); font-weight: bold;">■</span> Lo reduce</span>
                 </div>
                 """, unsafe_allow_html=True)
-
-            # Leyenda (Mockup 3)
-            st.markdown("""
-            <div style="display: flex; gap: 20px; font-size: 12px; color: var(--texto-suave); margin-top: 18px;">
-                <span><span style="color: var(--granate); font-weight: bold;">■</span> Aumenta el riesgo</span>
-                <span><span style="color: var(--azul-factor); font-weight: bold;">■</span> Lo reduce</span>
-            </div>
-            """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
 
             # Caja de sugerencia para el tutor (Mockup 3)
             recom_txt = pred_rec.get("recommendations", ["Agendar reunión para revisar la estrategia de estudio antes del cierre de Fase 2."])[0]
@@ -1218,24 +1366,28 @@ if usuario is not None:
         </div>
         """, unsafe_allow_html=True)
 
-        # Tarjeta FIPA-ACL (Mockup 4)
+        # Tarjeta FIPA-ACL (Mockup 4) con aislamiento estricto
         st.markdown('<div class="fipa-log-header">REGISTRO DE MENSAJES FIPA-ACL</div>', unsafe_allow_html=True)
 
-        mensajes_reales = get_recent_bus_messages(8)
+        if rol == "ESTUDIANTE":
+            mensajes_reales = get_bus_messages_for_student(usuario["cui_hash"], limit=8)
+        else:
+            mensajes_reales = get_recent_bus_messages(8)
+
         if not mensajes_reales:
             log_entries = [
-                ("[10:14:22]", "inform", "datos → predictor"),
-                ("[10:14:23]", "inform", "predictor → explicador"),
-                ("[10:14:24]", "inform", "explicador → tutor"),
-                ("[10:14:25]", "propose", "tutor → interfaz")
+                ("[10:14:22]", "inform", "Ingestion → Predictor (Datos consolidados)"),
+                ("[10:14:23]", "inform", "Predictor → Xai (Probabilidad calculada)"),
+                ("[10:14:24]", "inform", "Xai → Recommendation (Factores SHAP extraídos)"),
+                ("[10:14:25]", "propose", "Recommendation → UI (Propuesta pedagógica lista)")
             ]
         else:
             log_entries = []
-            for m in mensajes_reales[-6:]:
+            for m in reversed(mensajes_reales):
                 t_str = m.get("timestamp", "10:00:00")[-8:]
-                perf = m.get("performative", "inform").lower()
-                rem = m.get("sender", "agente").replace("Agent", "")
-                dest = m.get("receiver", "coordinador").replace("Agent", "")
+                perf = m.get("performativa", "inform").lower()
+                rem = m.get("emisor", "agente").replace("Agent", "")
+                dest = m.get("receptor", "coordinador").replace("Agent", "")
                 log_entries.append((f"[{t_str}]", perf, f"{rem} → {dest}"))
 
         log_html = "".join([
@@ -1248,7 +1400,7 @@ if usuario is not None:
             {log_html}
         </div>
         <div style="font-size: 13px; color: var(--texto-suave); margin-top: 14px;">
-            Cada alerta puede auditarse paso a paso por el jurado o el comité de tutoría.
+            Cada alerta puede auditarse paso a paso por el jurado o el comité de tutoría garantizando reproducibilidad.
         </div>
         """, unsafe_allow_html=True)
 
@@ -1261,49 +1413,72 @@ if usuario is not None:
         st.markdown('<h2 class="section-title">Evolución y plan de tutoría</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Trayectoria longitudinal de riesgo y compromisos pedagógicos</p>', unsafe_allow_html=True)
 
-        # Tarjeta superior: Gráfico de evolución temporal (Mockup 5)
-        st.markdown('<div class="unsa-card">', unsafe_allow_html=True)
-        col_g1, col_g2 = st.columns([3, 1])
+        if rol == "ESTUDIANTE":
+            mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
+            if not mis_mats:
+                st.info("No tiene asignaturas inscritas para consultar.")
+                st.stop()
+            mat_dict = {f"{m['curso']} (Sec. {m['seccion']})": m for m in mis_mats}
+            sel_c = st.selectbox("Asignatura a supervisar:", list(mat_dict.keys()), key="sel_plan_tut")
+            mat_act = mat_dict[sel_c]
+            mat_id_act = mat_act["id"]
+            nom_curso = mat_act["curso"]
+            nom_docente = mat_act["docente"]
+            cui_anon = usuario["cui_hash"]
+        else:
+            mat_id_act = 1
+            nom_curso = "Estructuras de Datos"
+            nom_docente = usuario["username"]
+            cui_anon = "7f3a...c91"
 
-        with col_g1:
-            fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor='white')
+        # Historial longitudinal real
+        historial = get_prediction_history(mat_id_act, current_user=usuario)
+        if len(historial) >= 2:
+            semanas = [f"CP{h['checkpoint']}" for h in historial]
+            riesgos = [h["probabilidad"] * 100 for h in historial]
+        else:
             semanas = ["Sem 1", "Sem 8", "Sem 16"]
             riesgos = [22.0, 48.0, 78.0]
 
-            # Líneas guía de umbrales
-            ax.axhline(y=38.0, color='#F59E0B', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Alerta (38%)")
-            ax.axhline(y=75.0, color='#EF4444', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Crítico (75%)")
+        # Tarjeta superior: Gráfico de evolución temporal (Mockup 5)
+        with st.container(border=True):
+            col_g1, col_g2 = st.columns([3, 1])
 
-            # Curva principal
-            ax.plot(semanas, riesgos, color='#7A1C20', linewidth=3, zorder=3)
-            # Puntos intermedios y punto final dorado con borde granate
-            ax.scatter(semanas[:-1], riesgos[:-1], color='#7A1C20', s=45, zorder=4)
-            ax.scatter([semanas[-1]], [riesgos[-1]], facecolors='#C59B27', edgecolors='#7A1C20', linewidth=2.5, s=90, zorder=5)
+            with col_g1:
+                fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor='white')
 
-            ax.set_ylim(0, 100)
-            ax.set_ylabel("Riesgo (%)", fontsize=11, color='#0F172A', fontweight='bold')
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['left'].set_color('#E2E8F0')
-            ax.spines['bottom'].set_color('#E2E8F0')
-            ax.tick_params(colors='#475569', labelsize=10)
-            ax.grid(axis='y', linestyle=':', alpha=0.5, color='#E2E8F0')
-            plt.tight_layout()
-            st.pyplot(fig)
+                # Líneas guía de umbrales normativos calibrados
+                ax.axhline(y=34.0, color='#F59E0B', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Preventivo (34%)")
+                ax.axhline(y=75.0, color='#EF4444', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Crítico (75%)")
 
-        with col_g2:
-            st.markdown("""
-            <div style="padding-top: 30px;">
-                <div style="font-size: 14px; font-weight: 700; color: var(--granate-oscuro);">Tendencia: <span style="font-family: 'JetBrains Mono', monospace; color: var(--granate);">al alza</span></div>
-                <div style="font-size: 12px; color: var(--texto-suave); margin-top: 4px;">Datos de seguimiento del estudiante en el semestre activo.</div>
-            </div>
-            """, unsafe_allow_html=True)
+                # Curva principal
+                ax.plot(semanas, riesgos, color='#7A1C20', linewidth=3, zorder=3)
+                ax.scatter(semanas[:-1], riesgos[:-1], color='#7A1C20', s=45, zorder=4)
+                ax.scatter([semanas[-1]], [riesgos[-1]], facecolors='#C59B27', edgecolors='#7A1C20', linewidth=2.5, s=90, zorder=5)
 
-        st.markdown('</div>', unsafe_allow_html=True)
+                ax.set_ylim(0, 100)
+                ax.set_ylabel("Riesgo (%)", fontsize=11, color='#0F172A', fontweight='bold')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['left'].set_color('#E2E8F0')
+                ax.spines['bottom'].set_color('#E2E8F0')
+                ax.tick_params(colors='#475569', labelsize=10)
+                ax.grid(axis='y', linestyle=':', alpha=0.5, color='#E2E8F0')
+                plt.tight_layout()
+                st.pyplot(fig)
+
+            with col_g2:
+                tendencia_txt = "al alza" if riesgos[-1] > riesgos[0] else "estable"
+                st.markdown(f"""
+                <div style="padding-top: 30px;">
+                    <div style="font-size: 14px; font-weight: 700; color: var(--granate-oscuro);">Tendencia: <span style="font-family: 'JetBrains Mono', monospace; color: var(--granate);">{tendencia_txt}</span></div>
+                    <div style="font-size: 12px; color: var(--texto-suave); margin-top: 4px;">Datos de seguimiento del estudiante en el semestre activo.</div>
+                </div>
+                """, unsafe_allow_html=True)
 
         # Tarjeta inferior: Lista de acciones de tutoría con casillas (Mockup 5)
-        st.markdown("""
-        <div class="unsa-card" style="padding: 18px 24px;">
+        with st.container(border=True):
+            st.markdown("""
             <div class="action-checklist-row">
                 <div class="action-box checked">&#10003;</div>
                 <div class="action-text">Acción 1: conversación inicial con el estudiante</div>
@@ -1319,8 +1494,7 @@ if usuario is not None:
                 <div class="action-text">Acción 3: reevaluar el semáforo tras Fase 2</div>
                 <div class="action-date">02/11/2026</div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
         # Botones de acción inferiores (Mockup 5)
         c_btn1, c_btn2, _ = st.columns([1.5, 1.5, 3])
@@ -1329,23 +1503,24 @@ if usuario is not None:
                 st.success("Tutoría guardada en la bitácora docente y registrada en el bus.")
         with c_btn2:
             pdf_bytes = generate_intervention_pdf(
-                student_id_anon="7f3a...c91",
-                curso="Estructuras de Datos",
-                docente=usuario["username"],
+                student_id_anon=cui_anon,
+                curso=nom_curso,
+                docente=nom_docente,
                 checkpoint="CP1",
-                probabilidad_pct=78.0,
+                probabilidad_pct=float(riesgos[-1]),
                 umbral_pct=34.0,
-                semaforo="ROJO",
+                semaforo="ROJO" if riesgos[-1] >= 50 else ("AMARILLO" if riesgos[-1] >= 25 else "VERDE"),
                 meta_nota_min=13.5,
                 promedio_acumulado=8.4,
                 imposible=False,
-                top_factors=[{"label": "Asistencia baja", "value": 0.42, "direction": "Riesgo"}],
-                recommendations=["Plan de tutoría individual y seguimiento en laboratorio."]
+                top_factors=[{"label": "Asistencia acumulada baja", "value": 0.42, "direction": "Riesgo"}],
+                recommendations=["Plan de tutoría individual y seguimiento en laboratorio de programación."],
+                current_user=usuario
             )
             st.download_button(
                 label="Exportar informe PDF",
                 data=pdf_bytes,
-                file_name="Ficha_Intervencion_SATA.pdf",
+                file_name=f"Ficha_Intervencion_SATA_{cui_anon[:8]}.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
@@ -1362,52 +1537,54 @@ if usuario is not None:
         docentes = get_all_teachers()
         nombres_cursos = [c["nombre"] for c in catalogo]
 
-        c_sel = st.selectbox("Seleccione la Asignatura:", nombres_cursos)
-        d_sel = st.selectbox("Docente Responsable:", docentes)
-        sec_sel = st.selectbox("Sección:", ["A", "B", "C"])
-        es_rep = st.selectbox("Condición de matrícula:", [0, 1], format_func=lambda x: "Repitente" if x == 1 else "Regular")
+        with st.container(border=True):
+            c_sel = st.selectbox("Seleccione la Asignatura:", nombres_cursos)
+            d_sel = st.selectbox("Docente Responsable:", docentes)
+            sec_sel = st.selectbox("Sección:", ["A", "B", "C"])
+            es_rep = st.selectbox("Condición de matrícula:", [0, 1], format_func=lambda x: "Repitente" if x == 1 else "Regular")
 
-        c_obj = next((c for c in catalogo if c["nombre"] == c_sel), None)
-        st.markdown("**Ponderaciones del Sílabo Oficial (%)**")
-        col_w1, col_w2, col_w3 = st.columns(3)
-        with col_w1:
-            w_ec1 = st.number_input("Fase 1 - EC1 (%):", value=c_obj["peso_ec1"] if c_obj else 15, min_value=5, max_value=40)
-            w_ep1 = st.number_input("Fase 1 - EP1 (%):", value=c_obj["peso_ep1"] if c_obj else 15, min_value=5, max_value=40)
-        with col_w2:
-            w_ec2 = st.number_input("Fase 2 - EC2 (%):", value=c_obj["peso_ec2"] if c_obj else 20, min_value=5, max_value=40)
-            w_ep2 = st.number_input("Fase 2 - EP2 (%):", value=c_obj["peso_ep2"] if c_obj else 20, min_value=5, max_value=40)
-        with col_w3:
-            w_ec3 = st.number_input("Fase 3 - EC3 (%):", value=c_obj["peso_ec3"] if c_obj else 15, min_value=5, max_value=40)
-            w_ep3 = st.number_input("Fase 3 - EP3 (%):", value=c_obj["peso_ep3"] if c_obj else 15, min_value=5, max_value=40)
+            c_obj = next((c for c in catalogo if c["nombre"] == c_sel), None)
+            st.markdown("**Ponderaciones del Sílabo Oficial (%)**")
+            col_w1, col_w2, col_w3 = st.columns(3)
+            with col_w1:
+                w_ec1 = st.number_input("Fase 1 - EC1 (%):", value=c_obj["peso_ec1"] if c_obj else 15, min_value=5, max_value=40)
+                w_ep1 = st.number_input("Fase 1 - EP1 (%):", value=c_obj["peso_ep1"] if c_obj else 15, min_value=5, max_value=40)
+            with col_w2:
+                w_ec2 = st.number_input("Fase 2 - EC2 (%):", value=c_obj["peso_ec2"] if c_obj else 20, min_value=5, max_value=40)
+                w_ep2 = st.number_input("Fase 2 - EP2 (%):", value=c_obj["peso_ep2"] if c_obj else 20, min_value=5, max_value=40)
+            with col_w3:
+                w_ec3 = st.number_input("Fase 3 - EC3 (%):", value=c_obj["peso_ec3"] if c_obj else 15, min_value=5, max_value=40)
+                w_ep3 = st.number_input("Fase 3 - EP3 (%):", value=c_obj["peso_ep3"] if c_obj else 15, min_value=5, max_value=40)
 
-        if (w_ec1 + w_ep1 + w_ec2 + w_ep2 + w_ec3 + w_ep3) != 100:
-            st.error("Las ponderaciones deben sumar exactamente 100%.")
-        else:
-            if st.button("Confirmar Inscripción de Asignatura", type="primary"):
-                pesos_dict = {"EC1": w_ec1, "EP1": w_ep1, "EC2": w_ec2, "EP2": w_ep2, "EC3": w_ec3, "EP3": w_ep3}
-                mat_id = enroll_course(usuario["cui_hash"], "2026-B", c_sel, d_sel, sec_sel, pesos_dict, es_rep)
-                st.success("Asignatura registrada y monitoreo activado.")
-                st.rerun()
+            if (w_ec1 + w_ep1 + w_ec2 + w_ep2 + w_ec3 + w_ep3) != 100:
+                st.error("Las ponderaciones deben sumar exactamente 100%.")
+            else:
+                if st.button("Confirmar Inscripción de Asignatura", type="primary"):
+                    pesos_dict = {"EC1": w_ec1, "EP1": w_ep1, "EC2": w_ec2, "EP2": w_ep2, "EC3": w_ec3, "EP3": w_ep3}
+                    enroll_course(usuario["cui_hash"], "2026-B", c_sel, d_sel, sec_sel, pesos_dict, es_rep, current_user=usuario)
+                    st.success("Asignatura registrada y monitoreo activado.")
+                    st.rerun()
 
     elif nav_sel == "Perfil Basal":
         st.markdown('<span class="section-label">ANTECEDENTES</span>', unsafe_allow_html=True)
         st.markdown('<h2 class="section-title">Perfil Académico Basal</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Variables históricas que alimentan el Checkpoint 0</p>', unsafe_allow_html=True)
 
-        perfil = get_student_profile(usuario["cui_hash"], "2026-B") or {}
-        with st.form("form_perfil"):
-            c1, c2 = st.columns(2)
-            with c1:
-                p_ira = st.number_input("IRA Acumulado previo (0–20):", 0.0, 20.0, float(perfil.get("ira_acum", 12.5)), step=0.1)
-                p_rep = st.number_input("Cursos reprobados previamente en la carrera:", 0, 20, int(perfil.get("repeticiones_previas", 0)))
-            with c2:
-                p_cred = st.number_input("Créditos matriculados este semestre:", 1, 30, int(perfil.get("creditos_matriculados", 22)))
-                p_ing = st.number_input("Semestres transcurridos desde su ingreso:", 1.0, 16.0, float(perfil.get("semestre_ingreso", 4.0)), step=0.5)
+        perfil = get_student_profile(usuario["cui_hash"], "2026-B", current_user=usuario) or {}
+        with st.container(border=True):
+            with st.form("form_perfil"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    p_ira = st.number_input("IRA Acumulado previo (0–20):", 0.0, 20.0, float(perfil.get("ira_acum", 12.5)), step=0.1)
+                    p_rep = st.number_input("Cursos reprobados previamente en la carrera:", 0, 20, int(perfil.get("repeticiones_previas", 0)))
+                with c2:
+                    p_cred = st.number_input("Créditos matriculados este semestre:", 1, 30, int(perfil.get("creditos_matriculados", 22)))
+                    p_ing = st.number_input("Semestres transcurridos desde su ingreso:", 1.0, 16.0, float(perfil.get("semestre_ingreso", 4.0)), step=0.5)
 
-            if st.form_submit_button("Guardar Perfil Basal"):
-                save_student_profile(usuario["cui_hash"], "2026-B", p_ira, p_rep, p_cred, p_ing)
-                st.success("Perfil basal registrado correctamente.")
-                st.rerun()
+                if st.form_submit_button("Guardar Perfil Basal"):
+                    save_student_profile(usuario["cui_hash"], "2026-B", p_ira, p_rep, p_cred, p_ing, current_user=usuario)
+                    st.success("Perfil basal registrado correctamente.")
+                    st.rerun()
 
     elif nav_sel == "Carga Masiva de Actas":
         st.markdown('<span class="section-label">DOCENCIA</span>', unsafe_allow_html=True)

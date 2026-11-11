@@ -10,6 +10,8 @@ from typing import Any
 
 from fpdf import FPDF
 
+from ..security.access_control import validate_student_access
+
 
 def sanitize_text(text: str) -> str:
     """Reemplaza caracteres especiales o matemáticos que puedan fallar en fuentes base."""
@@ -84,9 +86,13 @@ def generate_intervention_pdf(
     promedio_acumulado: float,
     imposible: bool,
     top_factors: list[dict[str, Any]],
-    recommendations: list[str]
+    recommendations: list[str],
+    current_user: dict[str, Any] | None = None
 ) -> bytes:
     """Genera el binario PDF de la ficha de intervención tutorial."""
+    if current_user:
+        validate_student_access(current_user, student_id_anon)
+
     pdf = SataReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=22)
     pdf.add_page()
