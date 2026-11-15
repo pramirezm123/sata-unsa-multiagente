@@ -24,7 +24,7 @@ class RecommendationAgent(BaseAgent):
 
             self.send(
                 receiver=message.sender,
-                performative="INFORM",
+                performative="PROPOSE",
                 content=recommendations,
                 conversation_id=message.conversation_id
             )

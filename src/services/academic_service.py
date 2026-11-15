@@ -12,6 +12,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..database.db import persist_acta_row_transactional
+from ..security.crypto import ensure_cui_hash
+
 
 def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario: bool = False) -> dict[str, Any]:
     """
@@ -166,18 +169,36 @@ def generar_plantilla_carga_masiva_csv() -> str:
     return output.getvalue()
 
 
-def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def validar_y_procesar_acta_masiva(
+    df: pd.DataFrame,
+    coordinator_agent,
+    semestre: str = "2026-B",
+    persist: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
-    Valida fila por fila un archivo de carga masiva.
+    Valida fila por fila un archivo de carga masiva (.csv / .xlsx).
     - Filas con errores se agregan al reporte de errores sin interrumpir el lote.
-    - Filas válidas se envían al bus del Sistema Multiagente para inferencia y semaforización.
+    - Aplica anonimización HMAC-SHA256 (cero CUI en texto claro en BD ni en resultados).
+    - Filas válidas se envían al bus del Sistema Multiagente para inferencia y semaforización,
+      y se persisten de forma transaccional en SQLite (estudiantes, perfil_semestre, matriculas,
+      notas, historial_cambios, predicciones, explicaciones, mensajes_bus y metricas_tecnicas).
     """
-    filas_procesadas = []
-    reporte_errores = []
+    filas_procesadas: list[dict[str, Any]] = []
+    reporte_errores: list[dict[str, Any]] = []
+
+    if df is None or df.empty:
+        reporte_errores.append({
+            "fila": 0,
+            "id_estudiante": "ARCHIVO_VACIO",
+            "error": "El archivo cargado no contiene filas de datos.",
+        })
+        return [], reporte_errores
 
     # Normalizar nombres de columnas a mayúsculas
-    col_map = {c: c.strip().upper() for c in df.columns}
+    col_map = {c: str(c).strip().upper() for c in df.columns}
     df_clean = df.rename(columns=col_map)
+    if "ID_ESTUDIANTE" not in df_clean.columns and "CUI" in df_clean.columns:
+        df_clean = df_clean.rename(columns={"CUI": "ID_ESTUDIANTE"})
 
     required_cols = ["ID_ESTUDIANTE", "CURSO", "DOCENTE"]
     missing = [c for c in required_cols if c not in df_clean.columns]
@@ -190,20 +211,32 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
         return [], reporte_errores
 
     for idx, row in df_clean.iterrows():
-        n_fila = idx + 2  # Fila en Excel contando encabezado
-        id_est = str(row.get("ID_ESTUDIANTE", f"FILA_{n_fila}")).strip()
+        n_fila = int(idx) + 2  # Fila en Excel contando encabezado
+        raw_id_val = row.get("ID_ESTUDIANTE")
+        id_est = "" if pd.isna(raw_id_val) else str(raw_id_val).strip()
         errores_fila = []
 
+        if not id_est or id_est.lower() in ["nan", "none", "null"]:
+            errores_fila.append("Falta especificar el identificador del estudiante (ID_ESTUDIANTE / CUI).")
+
         # 1. Validar curso y docente
-        curso = str(row.get("CURSO", "")).strip().upper()
-        docente = str(row.get("DOCENTE", "")).strip().upper()
-        seccion = str(row.get("SECCION", "A")).strip().upper()
+        raw_curso = row.get("CURSO", "")
+        raw_docente = row.get("DOCENTE", "")
+        raw_seccion = row.get("SECCION", "A")
+        curso = "" if pd.isna(raw_curso) else str(raw_curso).strip().upper()
+        docente = "" if pd.isna(raw_docente) else str(raw_docente).strip().upper()
+        seccion = "A" if pd.isna(raw_seccion) or not str(raw_seccion).strip() else str(raw_seccion).strip().upper()
+
         if not curso:
             errores_fila.append("Falta especificar el nombre de la asignatura.")
+        if not docente:
+            errores_fila.append("Falta especificar el docente responsable.")
 
         # Detección de inyección de fórmulas CSV (=, +, @, |)
+        tiene_formula = False
         for campo, val_str in [("ID_ESTUDIANTE", id_est), ("CURSO", curso), ("DOCENTE", docente), ("SECCION", seccion)]:
             if val_str and val_str[0] in ["=", "+", "@", "|"]:
+                tiene_formula = True
                 errores_fila.append(f"Contenido sospechoso de fórmula CSV no permitido en {campo}: {val_str}")
 
         # 2. Validar ponderaciones
@@ -262,16 +295,20 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
                 errores_fila.append(f"Formato numérico de CREDITOS_MATRICULADOS inválido: {raw_carga}")
 
         # 4. Validar y parsear calificaciones
-        eval_vals = {}
+        eval_vals: dict[str, float | None] = {}
+        eval_ausentes: dict[str, bool] = {}
         for ev in ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"]:
             raw_v = row.get(ev, np.nan)
             if pd.isna(raw_v) or str(raw_v).strip() == "":
                 eval_vals[ev] = None
+                eval_ausentes[ev] = False
             else:
                 str_v = str(raw_v).strip().upper()
                 if str_v in ["AUSENTE", "NSP", "NP"]:
                     eval_vals[ev] = 0.0  # El SMA registra ausente = True
+                    eval_ausentes[ev] = True
                 else:
+                    eval_ausentes[ev] = False
                     try:
                         num_v = float(str_v)
                         if num_v < 0 or num_v > 20:
@@ -281,17 +318,21 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
                     except Exception:
                         errores_fila.append(f"Valor no numérico en {ev}: {str_v}")
 
+        # 5. Aplicar anonimización HMAC-SHA256 antes de reportar o procesar
+        id_anon = f"FILA_{n_fila}_RECHAZADA" if (not id_est or tiene_formula) else ensure_cui_hash(id_est)
+
         if errores_fila:
             reporte_errores.append({
                 "fila": n_fila,
-                "id_estudiante": id_est,
+                "id_estudiante": id_anon,
                 "error": " | ".join(errores_fila)
             })
             continue
 
-        # 5. Si la fila es válida, procesar con el Coordinador Multiagente
+        # 6. Si la fila es válida, procesar con el Coordinador Multiagente usando el hash anonimizado
         payload = {
-            "CUI": id_est,
+            "CUI": id_anon,
+            "CUI_HASH": id_anon,
             "ASIGNATURA": curso,
             "ASIGNATURA_NORM": curso,
             "IRA_ACUM": ira,
@@ -306,13 +347,19 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
             "EC1": eval_vals["EC1"], "EP1": eval_vals["EP1"],
             "EC2": eval_vals["EC2"], "EP2": eval_vals["EP2"],
             "EC3": eval_vals["EC3"], "EP3": eval_vals["EP3"],
+            "EC1_AUSENTE": 1 if eval_ausentes["EC1"] else 0,
+            "EP1_AUSENTE": 1 if eval_ausentes["EP1"] else 0,
+            "EC2_AUSENTE": 1 if eval_ausentes["EC2"] else 0,
+            "EP2_AUSENTE": 1 if eval_ausentes["EP2"] else 0,
+            "EC3_AUSENTE": 1 if eval_ausentes["EC3"] else 0,
+            "EP3_AUSENTE": 1 if eval_ausentes["EP3"] else 0,
             "PESO_EC1": pesos["EC1"], "PESO_EP1": pesos["EP1"],
             "PESO_EC2": pesos["EC2"], "PESO_EP2": pesos["EP2"],
             "PESO_EC3": pesos["EC3"], "PESO_EP3": pesos["EP3"]
         }
 
         try:
-            res_sma = coordinator_agent.analyze_student_risk(payload)
+            res_sma = coordinator_agent.analyze_student_risk(payload, persist_telemetry=False)
             if res_sma["status"] == "SUCCESS":
                 al = res_sma["alert"]
                 # Determinar semáforo de 3 colores con banda amarilla
@@ -323,8 +370,25 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
                     al.get("imposible_ordinario", False)
                 )
 
+                if persist:
+                    persist_acta_row_transactional(
+                        raw_student_id=id_anon,
+                        semestre=semestre,
+                        curso=curso,
+                        docente=docente,
+                        seccion=seccion,
+                        pesos=pesos,
+                        ira=ira,
+                        repeticiones=rep,
+                        creditos_matriculados=carga,
+                        eval_vals=eval_vals,
+                        eval_ausentes=eval_ausentes,
+                        sma_result=res_sma,
+                        semaforo_color=semaf["color"],
+                    )
+
                 filas_procesadas.append({
-                    "id_estudiante": id_est,
+                    "id_estudiante": id_anon,
                     "curso": curso,
                     "seccion": seccion,
                     "checkpoint": al["checkpoint"],
@@ -339,14 +403,14 @@ def validar_y_procesar_acta_masiva(df: pd.DataFrame, coordinator_agent) -> tuple
             else:
                 reporte_errores.append({
                     "fila": n_fila,
-                    "id_estudiante": id_est,
+                    "id_estudiante": id_anon,
                     "error": f"Falla en el pipeline SMA: {', '.join(res_sma.get('errors', []))}"
                 })
         except Exception as e:
             reporte_errores.append({
                 "fila": n_fila,
-                "id_estudiante": id_est,
-                "error": f"Excepción durante el análisis: {e!s}"
+                "id_estudiante": id_anon,
+                "error": f"Excepción durante el procesamiento/persistencia: {e!s}"
             })
 
     return filas_procesadas, reporte_errores

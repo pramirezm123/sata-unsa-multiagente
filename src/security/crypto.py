@@ -40,6 +40,19 @@ def hash_cui(cui: str, salt: bytes | None = None) -> str:
     return h.hexdigest()[:16].upper()
 
 
+def ensure_cui_hash(raw_id: str) -> str:
+    """
+    Garantiza que cualquier identificador de estudiante se encuentre anonimizado
+    con HMAC-SHA256 (16 caracteres hexadecimales en mayúsculas).
+    Si el identificador ya es un hash hexadecimal válido de 16 caracteres, lo conserva;
+    en caso contrario aplica hash_cui().
+    """
+    clean = str(raw_id or "").strip().upper()
+    if len(clean) == 16 and all(c in "0123456789ABCDEF" for c in clean):
+        return clean
+    return hash_cui(clean)
+
+
 def hash_password(password: str) -> str:
     """
     Genera un hash seguro para la contraseña usando PBKDF2-HMAC-SHA256 con sal aleatoria.

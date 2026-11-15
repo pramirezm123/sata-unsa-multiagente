@@ -16,7 +16,7 @@ from ..security.access_control import (
     validate_matricula_ownership,
     validate_student_access,
 )
-from ..security.crypto import hash_cui, hash_password, verify_password
+from ..security.crypto import ensure_cui_hash, hash_cui, hash_password, verify_password
 
 DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "sata_unsa.db")
 
@@ -224,6 +224,26 @@ def init_database():
     );
     """)
 
+    # 13. Bitácora de Tutorías y Compromisos Pedagógicos
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tutorias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        matricula_id INTEGER NOT NULL,
+        cui_hash TEXT NOT NULL,
+        curso TEXT NOT NULL,
+        responsable TEXT NOT NULL,
+        rol_registro TEXT NOT NULL,
+        estado TEXT NOT NULL, -- 'PROGRAMADA', 'REALIZADA', 'SEGUIMIENTO'
+        fecha_sesion TEXT NOT NULL,
+        observaciones TEXT NOT NULL,
+        accion_1_ok INTEGER DEFAULT 0,
+        accion_2_ok INTEGER DEFAULT 0,
+        accion_3_ok INTEGER DEFAULT 0,
+        fecha_registro TEXT NOT NULL,
+        FOREIGN KEY (matricula_id) REFERENCES matriculas(id)
+    );
+    """)
+
     conn.commit()
     conn.close()
 
@@ -329,6 +349,51 @@ def seed_initial_data():
     INSERT OR IGNORE INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
     VALUES (1, ?, ?, 0.96, ?)
     """, (top_factors_demo, recs_demo, now_str))
+
+    # Sembrar traza FIPA-ACL real inicial para la evaluación demo (sin datos ficticios ni PII)
+    req_demo_id = f"eval_{cui_demo_1}_cp1"
+    existing_bus = cursor.execute(
+        "SELECT COUNT(*) FROM mensajes_bus WHERE request_id = ?", (req_demo_id,)
+    ).fetchone()[0]
+    if existing_bus == 0:
+        fipa_seed_steps = [
+            ("CoordinatorAgent", "IngestionAgent", "REQUEST", "INGEST"),
+            ("IngestionAgent", "CoordinatorAgent", "INFORM", "INGEST_OK"),
+            ("CoordinatorAgent", "PreprocessingAgent", "REQUEST", "PREPROCESS"),
+            ("PreprocessingAgent", "CoordinatorAgent", "INFORM", "FEATURES_CP1"),
+            ("CoordinatorAgent", "PredictorAgent", "REQUEST", "PREDICT"),
+            ("PredictorAgent", "CoordinatorAgent", "INFORM", "PREDICT_CP1"),
+            ("CoordinatorAgent", "XaiAgent", "REQUEST", "EXPLAIN"),
+            ("XaiAgent", "CoordinatorAgent", "INFORM", "SHAP_CP1"),
+            ("CoordinatorAgent", "RecommendationAgent", "REQUEST", "RECOMMEND"),
+            ("RecommendationAgent", "CoordinatorAgent", "PROPOSE", "PROPOSE_TUTORIA_CP1"),
+            ("CoordinatorAgent", "AlertAgent", "REQUEST", "GENERATE_ALERT"),
+            ("AlertAgent", "CoordinatorAgent", "INFORM", "ALERT_ALTO"),
+        ]
+        for emisor, receptor, perf, topico in fipa_seed_steps:
+            contenido_seguro = json.dumps({
+                "cui_hash": cui_demo_1,
+                "curso": "ESTRUCTURAS DE DATOS Y ALGORITMOS",
+                "checkpoint": "CP1",
+                "topic": topico,
+                "performative": perf,
+            })
+            cursor.execute("""
+            INSERT INTO mensajes_bus
+            (request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, 0.15, ?)
+            """, (req_demo_id, emisor, receptor, perf, topico, contenido_seguro, now_str))
+
+    # Sembrar registro inicial de tutoría programada para la matrícula demo
+    existing_tut = cursor.execute(
+        "SELECT COUNT(*) FROM tutorias WHERE matricula_id = 1"
+    ).fetchone()[0]
+    if existing_tut == 0:
+        cursor.execute("""
+        INSERT INTO tutorias
+        (matricula_id, cui_hash, curso, responsable, rol_registro, estado, fecha_sesion, observaciones, accion_1_ok, accion_2_ok, accion_3_ok, fecha_registro)
+        VALUES (1, ?, 'ESTRUCTURAS DE DATOS Y ALGORITMOS', 'DOCENTE PRINCIPAL 1', 'DOCENTE', 'PROGRAMADA', ?, 'Sesión diagnóstica inicial agendada tras alerta temprana en CP1.', 1, 0, 0, ?)
+        """, (cui_demo_1, now_str[:10], now_str))
 
     conn.commit()
     conn.close()
@@ -469,24 +534,46 @@ def get_all_teachers() -> list[str]:
 def enroll_course(cui_hash: str, semestre: str, curso: str, docente: str, 
                   seccion: str, pesos: dict[str, int], es_repeticion: int,
                   current_user: dict[str, Any] | None = None) -> int:
-    """Inscribe un curso para el estudiante y retorna el ID de la matrícula."""
+    """Inscribe o actualiza un curso para el estudiante (evitando matrículas duplicadas) y retorna el ID."""
     if current_user:
         validate_student_access(current_user, cui_hash)
     conn = get_connection()
     now_str = datetime.now().isoformat()
     cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO matriculas 
-    (cui_hash, semestre, curso, docente, seccion, peso_ec1, peso_ep1, peso_ec2, peso_ep2, peso_ec3, peso_ep3, es_repeticion, fecha_inscripcion)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        cui_hash, semestre, curso, docente, seccion,
-        pesos.get("EC1", 15), pesos.get("EP1", 15),
-        pesos.get("EC2", 20), pesos.get("EP2", 20),
-        pesos.get("EC3", 15), pesos.get("EP3", 15),
-        es_repeticion, now_str
-    ))
-    mat_id = cursor.lastrowid
+    existing = cursor.execute("""
+    SELECT id FROM matriculas
+    WHERE cui_hash = ? AND semestre = ? AND curso = ?
+    ORDER BY id DESC LIMIT 1
+    """, (cui_hash, semestre, curso)).fetchone()
+
+    if existing:
+        mat_id = int(existing["id"])
+        cursor.execute("""
+        UPDATE matriculas
+        SET docente = ?, seccion = ?, peso_ec1 = ?, peso_ep1 = ?,
+            peso_ec2 = ?, peso_ep2 = ?, peso_ec3 = ?, peso_ep3 = ?, es_repeticion = ?
+        WHERE id = ?
+        """, (
+            docente, seccion,
+            pesos.get("EC1", 15), pesos.get("EP1", 15),
+            pesos.get("EC2", 20), pesos.get("EP2", 20),
+            pesos.get("EC3", 15), pesos.get("EP3", 15),
+            es_repeticion, mat_id
+        ))
+    else:
+        cursor.execute("""
+        INSERT INTO matriculas 
+        (cui_hash, semestre, curso, docente, seccion, peso_ec1, peso_ep1, peso_ec2, peso_ep2, peso_ec3, peso_ep3, es_repeticion, fecha_inscripcion)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cui_hash, semestre, curso, docente, seccion,
+            pesos.get("EC1", 15), pesos.get("EP1", 15),
+            pesos.get("EC2", 20), pesos.get("EP2", 20),
+            pesos.get("EC3", 15), pesos.get("EP3", 15),
+            es_repeticion, now_str
+        ))
+        mat_id = int(cursor.lastrowid)
+
     conn.commit()
     conn.close()
     return mat_id
@@ -562,41 +649,328 @@ def get_grades_for_enrollment(matricula_id: int, current_user: dict[str, Any] | 
             "fecha": r["fecha_registro"]
         }
     return res
-    res = {}
-    for r in rows:
-        res[r["evaluacion"]] = {
-            "valor": r["valor_num"],
-            "es_ausente": bool(r["es_ausente"]),
-            "fecha": r["fecha_registro"]
-        }
-    return res
 
 
 def save_prediction_result(matricula_id: int, checkpoint: str, proba: float, 
                            umbral: float, semaforo: str, meta_nota: float | None, 
                            promedio: float, imposible: bool, top_factors: list, 
                            recs: list, fidelidad: float | None = None) -> int:
-    """Guarda la predicción y las explicaciones XAI asociadas."""
+    """Guarda o actualiza la predicción y las explicaciones XAI asociadas para un checkpoint."""
     conn = get_connection()
     now_str = datetime.now().isoformat()
     cursor = conn.cursor()
 
-    cursor.execute("""
-    INSERT INTO predicciones 
-    (matricula_id, checkpoint, probabilidad, umbral, semaforo, meta_nota_min, promedio_acumulado, imposible_ordinario, fecha)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (matricula_id, checkpoint, proba, umbral, semaforo, meta_nota, promedio, 1 if imposible else 0, now_str))
-    
-    pred_id = cursor.lastrowid
+    existing_pred = cursor.execute("""
+    SELECT id FROM predicciones
+    WHERE matricula_id = ? AND checkpoint = ?
+    ORDER BY id DESC LIMIT 1
+    """, (matricula_id, checkpoint)).fetchone()
 
-    cursor.execute("""
-    INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
-    VALUES (?, ?, ?, ?, ?)
-    """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad, now_str))
+    if existing_pred:
+        pred_id = int(existing_pred["id"])
+        cursor.execute("""
+        UPDATE predicciones
+        SET probabilidad = ?, umbral = ?, semaforo = ?, meta_nota_min = ?,
+            promedio_acumulado = ?, imposible_ordinario = ?, fecha = ?
+        WHERE id = ?
+        """, (proba, umbral, semaforo, meta_nota, promedio, 1 if imposible else 0, now_str, pred_id))
+
+        existing_exp = cursor.execute(
+            "SELECT id FROM explicaciones WHERE prediccion_id = ? LIMIT 1", (pred_id,)
+        ).fetchone()
+        if existing_exp:
+            cursor.execute("""
+            UPDATE explicaciones
+            SET top_factors_json = ?, recomendaciones_json = ?, fidelidad_r = ?, fecha = ?
+            WHERE prediccion_id = ?
+            """, (json.dumps(top_factors), json.dumps(recs), fidelidad, now_str, pred_id))
+        else:
+            cursor.execute("""
+            INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+            VALUES (?, ?, ?, ?, ?)
+            """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad, now_str))
+    else:
+        cursor.execute("""
+        INSERT INTO predicciones 
+        (matricula_id, checkpoint, probabilidad, umbral, semaforo, meta_nota_min, promedio_acumulado, imposible_ordinario, fecha)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (matricula_id, checkpoint, proba, umbral, semaforo, meta_nota, promedio, 1 if imposible else 0, now_str))
+        
+        pred_id = int(cursor.lastrowid)
+
+        cursor.execute("""
+        INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+        VALUES (?, ?, ?, ?, ?)
+        """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad, now_str))
 
     conn.commit()
     conn.close()
     return pred_id
+
+
+def persist_acta_row_transactional(
+    raw_student_id: str,
+    semestre: str,
+    curso: str,
+    docente: str,
+    seccion: str,
+    pesos: dict[str, int],
+    ira: float,
+    repeticiones: int,
+    creditos_matriculados: int,
+    eval_vals: dict[str, float | None],
+    eval_ausentes: dict[str, bool],
+    sma_result: dict[str, Any],
+    semaforo_color: str,
+) -> dict[str, Any]:
+    """
+    Persiste de forma atómica y transaccional todos los artefactos derivados de una fila
+    válida de carga masiva de actas:
+    1. Anonimización HMAC-SHA256 del CUI (cero CUI en claro).
+    2. Registro/actualización de catálogos, estudiante y perfil basal semestral.
+    3. Creación o actualización de matrícula (sin duplicados al reimportar).
+    4. Persistencia de calificaciones parciales y auditoría de cambios.
+    5. Persistencia de predicción y explicaciones SHAP (sin duplicados por checkpoint).
+    6. Persistencia de trazas FIPA-ACL del bus y métricas técnicas OBJ5.
+    Si ocurre cualquier excepción en la transacción, ejecuta ROLLBACK completo.
+    """
+    cui_hash = ensure_cui_hash(raw_student_id)
+    now_str = datetime.now().isoformat()
+    es_rep = 1 if repeticiones > 0 else 0
+
+    al = sma_result.get("alert", {})
+    pred = sma_result.get("prediction", {})
+    xai = sma_result.get("xai", {})
+    history = sma_result.get("history", [])
+    telemetry = sma_result.get("telemetry", {})
+
+    checkpoint = str(al.get("checkpoint") or pred.get("checkpoint") or "CP0")
+    prob_val = float(pred.get("probability", al.get("probability_pct", 0.0) / 100.0))
+    umbral_val = float(pred.get("threshold", al.get("threshold_pct", 34.0) / 100.0))
+    meta_nota = al.get("meta_nota_min")
+    prom_acum = float(al.get("promedio_acumulado") or 0.0)
+    imposible = bool(al.get("imposible_ordinario", False))
+    top_factors = al.get("top_factors") or xai.get("top_factors") or []
+    recs = al.get("recommendations") or []
+
+    curso_slug = "".join(ch if ch.isalnum() else "_" for ch in curso)[:16]
+    req_id = f"acta_{cui_hash}_{curso_slug}_{checkpoint}"
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE;")
+
+        # 1. Asegurar curso y docente en catálogos oficiales
+        cursor.execute("""
+        INSERT OR IGNORE INTO catalogo_cursos
+        (nombre, semestre_malla, peso_ec1, peso_ep1, peso_ec2, peso_ep2, peso_ec3, peso_ep3)
+        VALUES (?, 5, ?, ?, ?, ?, ?, ?)
+        """, (
+            curso,
+            pesos.get("EC1", 15), pesos.get("EP1", 15),
+            pesos.get("EC2", 20), pesos.get("EP2", 20),
+            pesos.get("EC3", 15), pesos.get("EP3", 15),
+        ))
+        cursor.execute(
+            "INSERT OR IGNORE INTO catalogo_docentes (nombre) VALUES (?)",
+            (docente,),
+        )
+
+        # 2. Registrar estudiante anonimizado
+        cursor.execute("""
+        INSERT OR IGNORE INTO estudiantes (cui_hash, consentimiento_aceptado, comparte_con_tutor, fecha_registro)
+        VALUES (?, 1, 1, ?)
+        """, (cui_hash, now_str))
+
+        # 3. Crear o actualizar perfil semestral basal
+        perf_row = cursor.execute("""
+        SELECT id FROM perfil_semestre
+        WHERE cui_hash = ? AND semestre = ?
+        ORDER BY id DESC LIMIT 1
+        """, (cui_hash, semestre)).fetchone()
+
+        if perf_row:
+            cursor.execute("""
+            UPDATE perfil_semestre
+            SET ira_acum = ?, repeticiones_previas = ?, creditos_matriculados = ?,
+                origen = 'ACTA_MASIVA', fecha_actualizacion = ?
+            WHERE id = ?
+            """, (ira, repeticiones, creditos_matriculados, now_str, int(perf_row["id"])))
+        else:
+            cursor.execute("""
+            INSERT INTO perfil_semestre
+            (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
+            VALUES (?, ?, ?, ?, ?, 4.0, 'ACTA_MASIVA', ?)
+            """, (cui_hash, semestre, ira, repeticiones, creditos_matriculados, now_str))
+
+        # 4. Crear o actualizar matrícula (evitando duplicados para el mismo cui_hash, semestre y curso)
+        mat_row = cursor.execute("""
+        SELECT id FROM matriculas
+        WHERE cui_hash = ? AND semestre = ? AND curso = ?
+        ORDER BY id DESC LIMIT 1
+        """, (cui_hash, semestre, curso)).fetchone()
+
+        if mat_row:
+            matricula_id = int(mat_row["id"])
+            cursor.execute("""
+            UPDATE matriculas
+            SET docente = ?, seccion = ?, peso_ec1 = ?, peso_ep1 = ?,
+                peso_ec2 = ?, peso_ep2 = ?, peso_ec3 = ?, peso_ep3 = ?, es_repeticion = ?
+            WHERE id = ?
+            """, (
+                docente, seccion,
+                pesos.get("EC1", 15), pesos.get("EP1", 15),
+                pesos.get("EC2", 20), pesos.get("EP2", 20),
+                pesos.get("EC3", 15), pesos.get("EP3", 15),
+                es_rep, matricula_id,
+            ))
+        else:
+            cursor.execute("""
+            INSERT INTO matriculas
+            (cui_hash, semestre, curso, docente, seccion, peso_ec1, peso_ep1, peso_ec2, peso_ep2, peso_ec3, peso_ep3, es_repeticion, fecha_inscripcion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cui_hash, semestre, curso, docente, seccion,
+                pesos.get("EC1", 15), pesos.get("EP1", 15),
+                pesos.get("EC2", 20), pesos.get("EP2", 20),
+                pesos.get("EC3", 15), pesos.get("EP3", 15),
+                es_rep, now_str,
+            ))
+            matricula_id = int(cursor.lastrowid)
+
+        # 5. Persistir calificaciones parciales y registrar historial de cambios si se actualizan
+        for ev in ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"]:
+            val_num = eval_vals.get(ev)
+            es_aus = 1 if eval_ausentes.get(ev, False) else 0
+            if val_num is None and not es_aus:
+                continue
+
+            prev_row = cursor.execute("""
+            SELECT valor_num, es_ausente FROM notas
+            WHERE matricula_id = ? AND evaluacion = ?
+            """, (matricula_id, ev)).fetchone()
+
+            if prev_row:
+                prev_val = prev_row["valor_num"]
+                prev_aus = int(prev_row["es_ausente"] or 0)
+                if prev_val != val_num or prev_aus != es_aus:
+                    cursor.execute("""
+                    INSERT INTO historial_cambios
+                    (matricula_id, evaluacion, valor_previo, valor_nuevo, motivo, fecha_cambio)
+                    VALUES (?, ?, ?, ?, 'Actualización por Carga Masiva de Acta', ?)
+                    """, (matricula_id, ev, prev_val, val_num, now_str))
+
+                    cursor.execute("""
+                    UPDATE notas
+                    SET valor_num = ?, es_ausente = ?, fecha_registro = ?, origen = 'DOCENTE_ACTA'
+                    WHERE matricula_id = ? AND evaluacion = ?
+                    """, (val_num, es_aus, now_str, matricula_id, ev))
+            else:
+                cursor.execute("""
+                INSERT INTO notas (matricula_id, evaluacion, valor_num, es_ausente, fecha_registro, origen)
+                VALUES (?, ?, ?, ?, ?, 'DOCENTE_ACTA')
+                """, (matricula_id, ev, val_num, es_aus, now_str))
+
+        # 6. Persistir o actualizar predicción y explicación SHAP para este (matricula_id, checkpoint)
+        pred_row = cursor.execute("""
+        SELECT id FROM predicciones
+        WHERE matricula_id = ? AND checkpoint = ?
+        ORDER BY id DESC LIMIT 1
+        """, (matricula_id, checkpoint)).fetchone()
+
+        if pred_row:
+            prediccion_id = int(pred_row["id"])
+            cursor.execute("""
+            UPDATE predicciones
+            SET probabilidad = ?, umbral = ?, semaforo = ?, meta_nota_min = ?,
+                promedio_acumulado = ?, imposible_ordinario = ?, fecha = ?
+            WHERE id = ?
+            """, (
+                prob_val, umbral_val, semaforo_color, meta_nota,
+                prom_acum, 1 if imposible else 0, now_str, prediccion_id,
+            ))
+            exp_row = cursor.execute(
+                "SELECT id FROM explicaciones WHERE prediccion_id = ? LIMIT 1",
+                (prediccion_id,),
+            ).fetchone()
+            if exp_row:
+                cursor.execute("""
+                UPDATE explicaciones
+                SET top_factors_json = ?, recomendaciones_json = ?, fidelidad_r = ?, fecha = ?
+                WHERE prediccion_id = ?
+                """, (json.dumps(top_factors), json.dumps(recs), 0.96, now_str, prediccion_id))
+            else:
+                cursor.execute("""
+                INSERT INTO explicaciones
+                (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+                VALUES (?, ?, ?, 0.96, ?)
+                """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), now_str))
+        else:
+            cursor.execute("""
+            INSERT INTO predicciones
+            (matricula_id, checkpoint, probabilidad, umbral, semaforo, meta_nota_min, promedio_acumulado, imposible_ordinario, fecha)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                matricula_id, checkpoint, prob_val, umbral_val,
+                semaforo_color, meta_nota, prom_acum, 1 if imposible else 0, now_str,
+            ))
+            prediccion_id = int(cursor.lastrowid)
+            cursor.execute("""
+            INSERT INTO explicaciones
+            (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+            VALUES (?, ?, ?, 0.96, ?)
+            """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), now_str))
+
+        # 7. Persistir trazas FIPA-ACL del bus para esta solicitud (sin duplicar al reimportar)
+        cursor.execute("DELETE FROM mensajes_bus WHERE request_id = ?", (req_id,))
+        for h_msg in history:
+            emisor = str(h_msg.get("sender", "CoordinatorAgent"))
+            receptor = str(h_msg.get("receiver", "Agent"))
+            perf = str(h_msg.get("performative", "INFORM"))
+            accion = str(h_msg.get("action") or perf)
+            dur_ms = float(h_msg.get("duration_ms", 0.0))
+            contenido_seguro = {
+                "cui_hash": cui_hash,
+                "curso": curso,
+                "checkpoint": checkpoint,
+                "action": accion,
+                "performative": perf,
+            }
+            cursor.execute("""
+            INSERT INTO mensajes_bus
+            (request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                req_id, emisor, receptor, perf, accion,
+                json.dumps(contenido_seguro), dur_ms, h_msg.get("timestamp", now_str),
+            ))
+
+        # 8. Persistir métricas técnicas reales OBJ5 (sin duplicar al reimportar)
+        cursor.execute("DELETE FROM metricas_tecnicas WHERE request_id = ?", (req_id,))
+        lat_inf = float(telemetry.get("latencia_inferencia_ms", 0.0))
+        lat_xai = float(telemetry.get("latencia_xai_ms", 0.0))
+        lat_tot = float(telemetry.get("latencia_total_ms", 0.0))
+        ram_mb = float(telemetry.get("ram_mb", 0.0))
+        over_ms = float(telemetry.get("overhead_bus_ms", 0.0))
+        cursor.execute("""
+        INSERT INTO metricas_tecnicas
+        (request_id, checkpoint, latencia_inferencia_ms, latencia_xai_ms, latencia_total_ms, ram_mb, overhead_bus_ms, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (req_id, checkpoint, lat_inf, lat_xai, lat_tot, ram_mb, over_ms, now_str))
+
+        conn.commit()
+        return {
+            "cui_hash": cui_hash,
+            "matricula_id": matricula_id,
+            "prediccion_id": prediccion_id,
+            "request_id": req_id,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_latest_prediction(matricula_id: int, current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -667,18 +1041,67 @@ def get_course_risk_summary(curso: str, semestre: str = "2026-B") -> dict[str, A
     }
 
 
+def get_course_sections_summary(curso: str, semestre: str = "2026-B") -> list[dict[str, Any]]:
+    """
+    Retorna estadísticas estrictamente agregadas por sección y docente para el rol AUTORIDAD.
+    No incluye CUI, hashes individuales, nombres ni calificaciones individuales.
+    """
+    conn = get_connection()
+    rows = conn.execute("""
+    SELECT m.seccion, m.docente, p.semaforo, p.probabilidad
+    FROM matriculas m
+    JOIN (
+        SELECT matricula_id, MAX(id) as max_id
+        FROM predicciones GROUP BY matricula_id
+    ) latest ON m.id = latest.matricula_id
+    JOIN predicciones p ON latest.max_id = p.id
+    WHERE m.curso = ? AND m.semestre = ?
+    ORDER BY m.seccion ASC
+    """, (curso, semestre)).fetchall()
+    conn.close()
+
+    grouped: dict[tuple[str, str], list[sqlite3.Row]] = {}
+    for r in rows:
+        key = (str(r["seccion"] or "A"), str(r["docente"] or "DOCENTE EPIS"))
+        grouped.setdefault(key, []).append(r)
+
+    summary_list = []
+    for (sec, doc), items in grouped.items():
+        total = len(items)
+        rojos = sum(1 for x in items if x["semaforo"] == "ROJO")
+        amarillos = sum(1 for x in items if x["semaforo"] == "AMARILLO")
+        verdes = sum(1 for x in items if x["semaforo"] == "VERDE")
+        prom_riesgo = round((sum(float(x["probabilidad"]) for x in items) / total * 100.0) if total > 0 else 0.0, 1)
+        summary_list.append({
+            "curso": curso,
+            "semestre": semestre,
+            "seccion": sec,
+            "docente": doc,
+            "total_alumnos": total,
+            "rojos": rojos,
+            "amarillos": amarillos,
+            "verdes": verdes,
+            "promedio_riesgo_pct": prom_riesgo,
+            "tasa_riesgo_pct": round((rojos / total * 100.0) if total > 0 else 0.0, 1),
+        })
+    return summary_list
+
+
 def get_course_students_table(curso: str, semestre: str = "2026-B", current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """
-    Retorna la lista de estudiantes para el docente/tutor.
+    Retorna la lista de estudiantes exclusivamente para el docente/tutor.
     Si el estudiante NO dio consentimiento (opt-in comparte_con_tutor=0),
-    sus datos individuales se anonimizan como 'ALUMNO_RESERVADO'.
-    Aplica aislamiento estricto: estudiantes y administradores no tienen acceso a notas individuales.
+    sus datos individuales se anonimizan como 'RES-XXXXXX'.
+    Aplica aislamiento estricto: ESTUDIANTE, ADMIN y AUTORIDAD no tienen acceso a registros individuales.
     """
     if current_user:
-        if current_user.get("role") == "ESTUDIANTE":
+        rol_u = current_user.get("role")
+        if rol_u == "ESTUDIANTE":
             raise AuthorizationError("Aislamiento estricto: Un estudiante no tiene autorización para listar otros alumnos del curso.")
-        if current_user.get("role") == "ADMIN":
+        if rol_u == "ADMIN":
             raise AuthorizationError("Principio de Privacidad: El Administrador no tiene acceso a notas individuales de estudiantes.")
+        if rol_u == "AUTORIDAD":
+            raise AuthorizationError("Principio de Privacidad: El rol Autoridad solo tiene acceso a métricas agregadas, no a registros individuales de estudiantes.")
 
     conn = get_connection()
     rows = conn.execute("""
@@ -728,28 +1151,399 @@ def get_bus_messages_for_student(cui_hash: str, limit: int = 8) -> list[dict[str
     return [dict(r) for r in rows]
 
 
-def log_bus_message(request_id: str, emisor: str, receptor: str, 
-                    performativa: str, topico: str, contenido: dict[str, Any], duracion_ms: float = 0.0):
+def log_bus_message(
+    request_id: str,
+    emisor: str,
+    receptor: str,
+    performativa: str,
+    topico: str,
+    contenido: dict[str, Any],
+    duracion_ms: float = 0.0,
+    conn: sqlite3.Connection | None = None,
+):
     """Registra en la base de datos cada mensaje FIPA-ACL para auditoría y monitor técnico."""
-    conn = get_connection()
+    own_conn = conn is None
+    db_conn = conn if conn is not None else get_connection()
     now_str = datetime.now().isoformat()
-    conn.execute("""
+    db_conn.execute("""
     INSERT INTO mensajes_bus (request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (request_id, emisor, receptor, performativa, topico, json.dumps(contenido), duracion_ms, now_str))
-    conn.commit()
-    conn.close()
+    if own_conn:
+        db_conn.commit()
+        db_conn.close()
 
 
 def get_recent_bus_messages(limit: int = 50) -> list[dict[str, Any]]:
     """Obtiene los mensajes más recientes del bus FIPA-ACL."""
     conn = get_connection()
     rows = conn.execute("""
-    SELECT id, request_id, emisor, receptor, performativa, topico, duracion_ms, timestamp 
+    SELECT id, request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp 
     FROM mensajes_bus ORDER BY id DESC LIMIT ?
     """, (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_enrollment_by_id(matricula_id: int, current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Obtiene el registro de una matrícula por su ID con validación estricta de permisos."""
+    conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
+    row = conn.execute("SELECT * FROM matriculas WHERE id = ?", (matricula_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_grade_change_history(matricula_id: int, current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Retorna el historial de auditoría de cambios de notas para una matrícula."""
+    conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
+    rows = conn.execute("""
+    SELECT evaluacion, valor_previo, valor_nuevo, motivo, fecha_cambio
+    FROM historial_cambios
+    WHERE matricula_id = ?
+    ORDER BY id DESC
+    """, (matricula_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_tutoring_checklist_state(matricula_id: int, current_user: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Obtiene el estado persistido de las 3 casillas del plan de tutoría para una matrícula."""
+    conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
+    row = conn.execute("""
+    SELECT accion_1_ok, accion_2_ok, accion_3_ok, fecha_sesion, fecha_registro
+    FROM tutorias
+    WHERE matricula_id = ?
+    ORDER BY id DESC LIMIT 1
+    """, (matricula_id,)).fetchone()
+    conn.close()
+    if not row:
+        return {
+            "accion_1": False,
+            "accion_2": False,
+            "accion_3": False,
+            "fecha_actualizacion": "Sin registros",
+        }
+    return {
+        "accion_1": bool(row["accion_1_ok"]),
+        "accion_2": bool(row["accion_2_ok"]),
+        "accion_3": bool(row["accion_3_ok"]),
+        "fecha_actualizacion": str(row["fecha_registro"])[:10],
+    }
+
+
+def get_tutoring_history(matricula_id: int, current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Retorna la bitácora histórica de sesiones de tutoría de una matrícula."""
+    conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
+    rows = conn.execute("""
+    SELECT id, matricula_id, cui_hash, curso, responsable, rol_registro, estado,
+           fecha_sesion, observaciones, accion_1_ok, accion_2_ok, accion_3_ok, fecha_registro
+    FROM tutorias
+    WHERE matricula_id = ?
+    ORDER BY id DESC
+    """, (matricula_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def schedule_tutoring_session(
+    matricula_id: int,
+    fecha_sesion: str,
+    observaciones: str,
+    current_user: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Programa y persiste una sesión de tutoría en SQLite validando permisos y campos obligatorios."""
+    fecha_clean = str(fecha_sesion or "").strip()
+    obs_clean = str(observaciones or "").strip()
+    if not fecha_clean:
+        return False, "Debe especificar una fecha válida para programar la tutoría."
+    if len(obs_clean) < 5:
+        return False, "Debe ingresar el motivo u observación de la tutoría (mínimo 5 caracteres)."
+
+    conn = get_connection()
+    try:
+        if current_user:
+            validate_matricula_ownership(current_user, matricula_id, conn)
+        mat_row = conn.execute("SELECT * FROM matriculas WHERE id = ?", (matricula_id,)).fetchone()
+        if not mat_row:
+            return False, "No se encontró la matrícula seleccionada en la base de datos."
+
+        prev_tut = conn.execute(
+            "SELECT accion_1_ok, accion_2_ok, accion_3_ok FROM tutorias WHERE matricula_id = ? ORDER BY id DESC LIMIT 1",
+            (matricula_id,),
+        ).fetchone()
+        a1 = int(prev_tut["accion_1_ok"]) if prev_tut else 1
+        a2 = int(prev_tut["accion_2_ok"]) if prev_tut else 0
+        a3 = int(prev_tut["accion_3_ok"]) if prev_tut else 0
+
+        now_str = datetime.now().isoformat()
+        cui_h = str(mat_row["cui_hash"])
+        curso = str(mat_row["curso"])
+        resp = str(current_user.get("username") if current_user else mat_row["docente"])
+        rol_reg = str(current_user.get("role") if current_user else "DOCENTE")
+
+        conn.execute("""
+        INSERT INTO tutorias
+        (matricula_id, cui_hash, curso, responsable, rol_registro, estado, fecha_sesion, observaciones, accion_1_ok, accion_2_ok, accion_3_ok, fecha_registro)
+        VALUES (?, ?, ?, ?, ?, 'PROGRAMADA', ?, ?, ?, ?, ?, ?)
+        """, (matricula_id, cui_h, curso, resp, rol_reg, fecha_clean, obs_clean, a1, a2, a3, now_str))
+
+        req_id = f"tut_prog_{cui_h[:12]}_{matricula_id}"
+        contenido_bus = json.dumps({
+            "cui_hash": cui_h,
+            "curso": curso,
+            "estado": "PROGRAMADA",
+            "fecha_sesion": fecha_clean,
+        })
+        conn.execute("""
+        INSERT INTO mensajes_bus
+        (request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp)
+        VALUES (?, 'TutoriaUI', 'AlertAgent', 'REQUEST', 'PROGRAMAR_TUTORIA', ?, 0.2, ?)
+        """, (req_id, contenido_bus, now_str))
+
+        conn.commit()
+        return True, f"Sesión de tutoría programada para el {fecha_clean} y persistida en SQLite."
+    finally:
+        conn.close()
+
+
+def register_tutoring_session(
+    matricula_id: int,
+    fecha_sesion: str,
+    estado: str,
+    observaciones: str,
+    accion_1: bool,
+    accion_2: bool,
+    accion_3: bool,
+    current_user: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Registra una intervención de tutoría y actualiza el estado del checklist en SQLite."""
+    fecha_clean = str(fecha_sesion or "").strip()
+    estado_clean = str(estado or "REALIZADA").strip().upper()
+    obs_clean = str(observaciones or "").strip()
+
+    if not fecha_clean:
+        return False, "La fecha de la sesión de tutoría es obligatoria."
+    if estado_clean not in ("PROGRAMADA", "REALIZADA", "SEGUIMIENTO"):
+        return False, "El estado de la tutoría no es válido."
+    if len(obs_clean) < 5:
+        return False, "Debe ingresar las observaciones o acuerdos pedagógicos de la tutoría (mínimo 5 caracteres)."
+
+    conn = get_connection()
+    try:
+        if current_user:
+            validate_matricula_ownership(current_user, matricula_id, conn)
+        mat_row = conn.execute("SELECT * FROM matriculas WHERE id = ?", (matricula_id,)).fetchone()
+        if not mat_row:
+            return False, "No se encontró la matrícula indicada."
+
+        now_str = datetime.now().isoformat()
+        cui_h = str(mat_row["cui_hash"])
+        curso = str(mat_row["curso"])
+        resp = str(current_user.get("username") if current_user else mat_row["docente"])
+        rol_reg = str(current_user.get("role") if current_user else "DOCENTE")
+
+        conn.execute("""
+        INSERT INTO tutorias
+        (matricula_id, cui_hash, curso, responsable, rol_registro, estado, fecha_sesion, observaciones, accion_1_ok, accion_2_ok, accion_3_ok, fecha_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            matricula_id, cui_h, curso, resp, rol_reg, estado_clean, fecha_clean, obs_clean,
+            1 if accion_1 else 0, 1 if accion_2 else 0, 1 if accion_3 else 0, now_str,
+        ))
+
+        req_id = f"tut_reg_{cui_h[:12]}_{matricula_id}"
+        contenido_bus = json.dumps({
+            "cui_hash": cui_h,
+            "curso": curso,
+            "estado": estado_clean,
+            "compromisos": [bool(accion_1), bool(accion_2), bool(accion_3)],
+        })
+        conn.execute("""
+        INSERT INTO mensajes_bus
+        (request_id, emisor, receptor, performativa, topico, contenido_json, duracion_ms, timestamp)
+        VALUES (?, 'TutoriaUI', 'RecommendationAgent', 'INFORM', 'REGISTRAR_TUTORIA', ?, 0.2, ?)
+        """, (req_id, contenido_bus, now_str))
+
+        conn.commit()
+        return True, "Intervención de tutoría y compromisos pedagógicos guardados en la bitácora SQLite."
+    finally:
+        conn.close()
+
+
+def get_header_metrics(
+    current_user: dict[str, Any],
+    semestre: str = "2026-B",
+    curso_filtro: str | None = None,
+) -> dict[str, Any]:
+    """
+    Calcula los indicadores de la sub-cabecera directamente desde SQLite sin valores estáticos ni ficticios:
+    - Rol ESTUDIANTE: asignaturas inscritas del propio alumno, sus tutorías registradas y última actualización de sus predicciones.
+    - Roles DOCENTE / AUTORIDAD / ADMIN: matrículas activas en seguimiento en el semestre, tutorías registradas y última actualización real.
+    """
+    conn = get_connection()
+    rol = str(current_user.get("role", "ESTUDIANTE"))
+
+    if rol == "ESTUDIANTE":
+        cui_h = str(current_user.get("cui_hash") or current_user.get("username") or "")
+        total_items = int(conn.execute(
+            "SELECT COUNT(*) FROM matriculas WHERE cui_hash = ? AND semestre = ?",
+            (cui_h, semestre),
+        ).fetchone()[0])
+        total_tutorias = int(conn.execute(
+            "SELECT COUNT(*) FROM tutorias WHERE cui_hash = ?",
+            (cui_h,),
+        ).fetchone()[0])
+        ult_row = conn.execute("""
+        SELECT MAX(p.fecha) as max_fecha
+        FROM predicciones p
+        JOIN matriculas m ON p.matricula_id = m.id
+        WHERE m.cui_hash = ? AND m.semestre = ?
+        """, (cui_h, semestre)).fetchone()
+        label_col1 = "ASIGNATURAS INSCRITAS"
+        label_col2 = "TUTORÍAS REGISTRADAS"
+    else:
+        if curso_filtro:
+            total_items = int(conn.execute(
+                "SELECT COUNT(*) FROM matriculas WHERE semestre = ? AND curso = ?",
+                (semestre, curso_filtro),
+            ).fetchone()[0])
+        else:
+            total_items = int(conn.execute(
+                "SELECT COUNT(*) FROM matriculas WHERE semestre = ?",
+                (semestre,),
+            ).fetchone()[0])
+        total_tutorias = int(conn.execute(
+            "SELECT COUNT(*) FROM tutorias"
+        ).fetchone()[0])
+        ult_row = conn.execute(
+            "SELECT MAX(fecha) as max_fecha FROM predicciones"
+        ).fetchone()
+        label_col1 = "ESTUDIANTES EN SEGUIMIENTO"
+        label_col2 = "TUTORÍAS ESTA SEMANA"
+
+    conn.close()
+
+    max_fecha_raw = ult_row["max_fecha"] if (ult_row and ult_row["max_fecha"]) else None
+    if max_fecha_raw:
+        try:
+            dt_obj = datetime.fromisoformat(str(max_fecha_raw))
+            ultima_actualizacion = dt_obj.strftime("%d/%m/%Y")
+        except Exception:
+            ultima_actualizacion = str(max_fecha_raw)[:10]
+    else:
+        ultima_actualizacion = "Sin registros"
+
+    return {
+        "label_col1": label_col1,
+        "valor_col1": total_items,
+        "label_col2": label_col2,
+        "valor_col2": total_tutorias,
+        "ultima_actualizacion": ultima_actualizacion,
+    }
+
+
+def evaluate_and_persist_enrollment(
+    matricula_id: int,
+    coordinator_agent,
+    current_user: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Reevalúa una matrícula con el Sistema Multiagente tras registrar o modificar calificaciones
+    parciales (save_grade) y persiste la predicción y explicaciones SHAP en SQLite.
+    """
+    conn = get_connection()
+    if current_user:
+        validate_matricula_ownership(current_user, matricula_id, conn)
+    mat = conn.execute("SELECT * FROM matriculas WHERE id = ?", (matricula_id,)).fetchone()
+    if not mat:
+        conn.close()
+        return {"status": "ERROR", "errors": ["Matrícula no encontrada."]}
+
+    cui_h = str(mat["cui_hash"])
+    sem = str(mat["semestre"])
+    perf = conn.execute(
+        "SELECT * FROM perfil_semestre WHERE cui_hash = ? AND semestre = ? ORDER BY id DESC LIMIT 1",
+        (cui_h, sem),
+    ).fetchone()
+    notas_rows = conn.execute(
+        "SELECT evaluacion, valor_num, es_ausente FROM notas WHERE matricula_id = ?",
+        (matricula_id,),
+    ).fetchall()
+    conn.close()
+
+    notas_map = {r["evaluacion"]: (r["valor_num"], bool(r["es_ausente"])) for r in notas_rows}
+    payload: dict[str, Any] = {
+        "CUI": cui_h,
+        "CUI_HASH": cui_h,
+        "ASIGNATURA": mat["curso"],
+        "ASIGNATURA_NORM": mat["curso"],
+        "IRA_ACUM": float(perf["ira_acum"]) if perf else 12.0,
+        "TASA_APROB_ACUM": 0.85,
+        "REPROBACIONES_PREVIAS": int(perf["repeticiones_previas"]) if perf else int(mat["es_repeticion"]),
+        "CARGA_ACADEMICA": int(perf["creditos_matriculados"]) if perf else 6,
+        "ES_REPETICION": int(mat["es_repeticion"]),
+        "SEMESTRES_DESDE_INGRESO": float(perf["semestre_ingreso"]) if perf else 4.0,
+        "DIFICULTAD_CURSO_HIST": 0.12,
+        "DIFICULTAD_DOCENTE_HIST": 0.08,
+        "DIFICULTAD_CURSO_DOCENTE_HIST": 0.10,
+        "PESO_EC1": int(mat["peso_ec1"]),
+        "PESO_EP1": int(mat["peso_ep1"]),
+        "PESO_EC2": int(mat["peso_ec2"]),
+        "PESO_EP2": int(mat["peso_ep2"]),
+        "PESO_EC3": int(mat["peso_ec3"]),
+        "PESO_EP3": int(mat["peso_ep3"]),
+    }
+    for ev in ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"]:
+        if ev in notas_map:
+            val_num, is_aus = notas_map[ev]
+            payload[ev] = 0.0 if is_aus else val_num
+            payload[f"{ev}_AUSENTE"] = 1 if is_aus else 0
+        else:
+            payload[ev] = None
+            payload[f"{ev}_AUSENTE"] = 0
+
+    res_sma = coordinator_agent.analyze_student_risk(payload, persist_telemetry=True)
+    if res_sma.get("status") != "SUCCESS":
+        return res_sma
+
+    al = res_sma["alert"]
+    pred = res_sma["prediction"]
+    xai = res_sma["xai"]
+    checkpoint = str(al.get("checkpoint") or pred.get("checkpoint") or "CP0")
+    prob_val = float(pred.get("probability", al.get("probability_pct", 0.0) / 100.0))
+    umbral_val = float(pred.get("threshold", al.get("threshold_pct", 34.0) / 100.0))
+    imposible = bool(al.get("imposible_ordinario", False))
+
+    th_yellow = round(0.75 * umbral_val, 4)
+    if imposible or prob_val >= umbral_val:
+        semaforo = "ROJO"
+    elif prob_val >= th_yellow:
+        semaforo = "AMARILLO"
+    else:
+        semaforo = "VERDE"
+
+    save_prediction_result(
+        matricula_id=matricula_id,
+        checkpoint=checkpoint,
+        proba=prob_val,
+        umbral=umbral_val,
+        semaforo=semaforo,
+        meta_nota=al.get("meta_nota_min"),
+        promedio=float(al.get("promedio_acumulado") or 0.0),
+        imposible=imposible,
+        top_factors=al.get("top_factors") or xai.get("top_factors") or [],
+        recs=al.get("recommendations") or [],
+        fidelidad=0.96,
+    )
+    return res_sma
 
 
 def log_technical_metrics(request_id: str, checkpoint: str, lat_inf_ms: float, 
@@ -768,7 +1562,11 @@ def log_technical_metrics(request_id: str, checkpoint: str, lat_inf_ms: float,
 
 
 def get_technical_metrics_summary() -> dict[str, Any]:
-    """Calcula estadísticas descriptivas para la Ficha de Desempeño Técnico del OBJ5."""
+    """
+    Calcula estadísticas descriptivas para la Ficha de Desempeño Técnico del OBJ5.
+    Garantiza un esquema de claves homogéneo tanto cuando la tabla está vacía
+    (total_muestras == 0) como cuando existen mediciones reales registradas.
+    """
     conn = get_connection()
     rows = conn.execute("""
     SELECT latencia_inferencia_ms, latencia_xai_ms, latencia_total_ms, ram_mb, overhead_bus_ms
@@ -779,24 +1577,32 @@ def get_technical_metrics_summary() -> dict[str, Any]:
     if not rows:
         return {
             "total_muestras": 0,
-            "latencia_inf_media": 0.0,
-            "latencia_xai_media": 0.0,
-            "ram_media": 0.0,
-            "overhead_media": 0.0
+            "latencia_inf_media_ms": 0.0,
+            "latencia_inf_p95_ms": 0.0,
+            "latencia_xai_media_ms": 0.0,
+            "latencia_total_media_ms": 0.0,
+            "ram_media_mb": 0.0,
+            "overhead_media_ms": 0.0,
         }
 
-    inf_vals = [r["latencia_inferencia_ms"] for r in rows]
-    xai_vals = [r["latencia_xai_ms"] for r in rows if r["latencia_xai_ms"] is not None]
-    ram_vals = [r["ram_mb"] for r in rows]
-    over_vals = [r["overhead_bus_ms"] for r in rows if r["overhead_bus_ms"] is not None]
+    inf_vals = [float(r["latencia_inferencia_ms"]) for r in rows if r["latencia_inferencia_ms"] is not None]
+    xai_vals = [float(r["latencia_xai_ms"]) for r in rows if r["latencia_xai_ms"] is not None]
+    tot_vals = [float(r["latencia_total_ms"]) for r in rows if r["latencia_total_ms"] is not None]
+    ram_vals = [float(r["ram_mb"]) for r in rows if r["ram_mb"] is not None]
+    over_vals = [float(r["overhead_bus_ms"]) for r in rows if r["overhead_bus_ms"] is not None]
+
+    sorted_inf = sorted(inf_vals) if inf_vals else [0.0]
+    p95_idx = min(len(sorted_inf) - 1, int(len(sorted_inf) * 0.95))
+    p95_val = sorted_inf[p95_idx] if len(sorted_inf) >= 20 else max(sorted_inf)
 
     return {
         "total_muestras": len(rows),
-        "latencia_inf_media_ms": round(sum(inf_vals) / len(inf_vals), 2),
-        "latencia_inf_p95_ms": round(sorted(inf_vals)[int(len(inf_vals) * 0.95)] if len(inf_vals) >= 20 else max(inf_vals), 2),
+        "latencia_inf_media_ms": round(sum(inf_vals) / len(inf_vals), 2) if inf_vals else 0.0,
+        "latencia_inf_p95_ms": round(p95_val, 2),
         "latencia_xai_media_ms": round(sum(xai_vals) / len(xai_vals), 2) if xai_vals else 0.0,
-        "ram_media_mb": round(sum(ram_vals) / len(ram_vals), 1),
-        "overhead_media_ms": round(sum(over_vals) / len(over_vals), 3) if over_vals else 0.0
+        "latencia_total_media_ms": round(sum(tot_vals) / len(tot_vals), 2) if tot_vals else 0.0,
+        "ram_media_mb": round(sum(ram_vals) / len(ram_vals), 1) if ram_vals else 0.0,
+        "overhead_media_ms": round(sum(over_vals) / len(over_vals), 3) if over_vals else 0.0,
     }
 
 

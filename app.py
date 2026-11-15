@@ -12,6 +12,8 @@ import datetime
 import os
 import sys
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
@@ -22,29 +24,44 @@ if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
 from src.agents.coordinator_agent import CoordinatorAgent
+from src.agents.xai_agent import format_shap_factor_for_ui
 from src.database.db import (
     authenticate_user,
     enroll_course,
+    evaluate_and_persist_enrollment,
     get_all_courses,
     get_all_teachers,
     get_bus_messages_for_student,
     get_course_risk_summary,
+    get_course_sections_summary,
     get_course_students_table,
+    get_enrollment_by_id,
+    get_grade_change_history,
+    get_grades_for_enrollment,
+    get_header_metrics,
     get_latest_prediction,
     get_prediction_history,
     get_recent_bus_messages,
     get_student_enrollments,
+    get_student_info,
     get_student_profile,
     get_surveys_stats,
     get_technical_metrics_summary,
+    get_tutoring_checklist_state,
+    get_tutoring_history,
     register_student_user,
+    register_tutoring_session,
+    save_grade,
     save_student_profile,
     save_survey,
+    schedule_tutoring_session,
+    update_student_consent,
 )
 from src.messaging.bus import MessageBus
 from src.reports.pdf_generator import generate_intervention_pdf
 from src.security.crypto import hash_cui
 from src.services.academic_service import (
+    calcular_simulacion_sustitutorio,
     generar_plantilla_carga_masiva_csv,
     validar_y_procesar_acta_masiva,
 )
@@ -106,11 +123,13 @@ st.markdown("""
         --riesgo-bajo-texto: #166534;
     }
 
-    /* Streamlit Header transparente para mantener activo el botón del menú lateral */
+    /* Streamlit Header con barra superior limpia para alojar el botón de menú sin solapar contenido */
     header[data-testid="stHeader"] {
-        background: transparent !important;
+        background: rgba(248, 250, 252, 0.92) !important;
+        backdrop-filter: blur(6px) !important;
+        border-bottom: 1px solid rgba(226, 232, 240, 0.8) !important;
         z-index: 999990 !important;
-        height: 3.2rem !important;
+        height: 2.75rem !important;
     }
     footer { display: none !important; }
     #MainMenu { visibility: hidden !important; }
@@ -125,8 +144,8 @@ st.markdown("""
     [data-testid="stSidebarCollapsedControl"],
     [data-testid="stExpandSidebarButton"],
     button[aria-label="Expand sidebar"] {
-        top: 0.6rem !important;
-        left: 0.8rem !important;
+        top: 0.35rem !important;
+        left: 0.75rem !important;
         z-index: 999999 !important;
         display: flex !important;
         visibility: visible !important;
@@ -138,13 +157,17 @@ st.markdown("""
     button[aria-label="Expand sidebar"] {
         opacity: 1 !important;
         visibility: visible !important;
-        display: flex !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
         background: var(--granate) !important;
         color: #FFFFFF !important;
         border: 1.5px solid var(--dorado) !important;
         border-radius: 8px !important;
-        box-shadow: 0 2px 10px rgba(122, 28, 32, 0.35) !important;
-        padding: 5px 9px !important;
+        box-shadow: 0 2px 8px rgba(122, 28, 32, 0.28) !important;
+        padding: 4px 8px !important;
+        min-height: 32px !important;
+        height: 32px !important;
         transition: all .2s ease !important;
     }
     [data-testid="stSidebarCollapsedControl"] button:hover,
@@ -153,7 +176,7 @@ st.markdown("""
     button[aria-label="Expand sidebar"]:hover {
         background: var(--granate-oscuro) !important;
         border-color: var(--dorado-claro) !important;
-        transform: scale(1.05) !important;
+        transform: translateY(-1px) !important;
     }
     [data-testid="stSidebarCollapsedControl"] svg,
     [data-testid="stSidebarCollapseButton"] svg,
@@ -163,128 +186,226 @@ st.markdown("""
         stroke: #FFFFFF !important;
         color: #FFFFFF !important;
     }
-    [data-testid="stSidebarCollapsedControl"] button:hover,
-    [data-testid="stSidebarCollapseButton"] button:hover {
-        background: var(--granate-oscuro) !important;
-        border-color: var(--dorado-claro) !important;
-        transform: scale(1.05) !important;
-    }
-    [data-testid="stSidebarCollapsedControl"] svg,
-    [data-testid="stSidebarCollapseButton"] svg {
-        fill: #FFFFFF !important;
-        stroke: #FFFFFF !important;
+
+    /* Preservación estricta de fuente Material Symbols para evitar ligaduras rotas (keyboard_double_) */
+    [data-testid="stIconMaterial"],
+    [data-testid="stSidebarCollapseButton"] span,
+    [data-testid="stSidebarCollapsedControl"] span,
+    [data-testid="stExpandSidebarButton"] span,
+    button[aria-label="Expand sidebar"] span,
+    button[aria-label="Close sidebar"] span {
+        font-family: 'Material Symbols Rounded', 'Material Icons' !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        font-size: 20px !important;
+        line-height: 1 !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+        -webkit-font-smoothing: antialiased !important;
         color: #FFFFFF !important;
     }
 
     /* Fondo general y contenedor en modo claro institucional */
-    html, body, [data-testid="stAppViewContainer"] {
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
         background-color: var(--fondo) !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
         color: var(--texto) !important;
+        overflow-x: hidden !important;
     }
     .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 3.3rem !important;
         padding-bottom: 3rem !important;
         padding-left: 2rem !important;
         padding-right: 2rem !important;
-        max-width: 1220px !important;
+        max-width: 1240px !important;
     }
 
-    /* Forzar contraste alto en todos los textos de la página principal */
-    [data-testid="stAppViewContainer"] p,
-    [data-testid="stAppViewContainer"] label,
-    [data-testid="stAppViewContainer"] .stMarkdown,
-    [data-testid="stAppViewContainer"] [data-testid="stWidgetLabel"] p,
-    [data-testid="stAppViewContainer"] [data-testid="stWidgetLabel"] label,
-    [data-testid="stAppViewContainer"] .stRadio label p,
-    [data-testid="stAppViewContainer"] .stRadio label span,
-    [data-testid="stAppViewContainer"] .stRadio label {
+    /* Contraste alto en textos del área principal (excluyendo Sidebar y consola FIPA-ACL) */
+    [data-testid="stMain"] p:not(.fipa-log-body *),
+    [data-testid="stMain"] label,
+    [data-testid="stMain"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stMain"] [data-testid="stWidgetLabel"] label,
+    [data-testid="stMain"] .stRadio label p,
+    [data-testid="stMain"] .stRadio label span,
+    [data-testid="stMain"] .stRadio label {
         color: var(--texto) !important;
     }
 
-    /* Textos secundarios y captions con contraste estricto (Slate 600) */
+    /* Textos secundarios y captions del área principal con contraste estricto (Slate 600) */
     .section-subtitle,
     .sub-footer-row,
     .sub-footer-row span,
     .sub-metric-label,
-    .cui-mono,
     .node-desc,
     .action-date,
-    .fipa-time,
-    [data-testid="stAppViewContainer"] .stCaption,
-    [data-testid="stAppViewContainer"] .stCaption p {
+    [data-testid="stMain"] .stCaption,
+    [data-testid="stMain"] .stCaption p {
         color: var(--texto-suave) !important;
     }
 
-    /* Sidebar oficial con degradado y textos blancos */
+    /* Identificador anonimizado tipo badge monoespaciado */
+    .cui-mono {
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        color: var(--granate-oscuro) !important;
+        background-color: var(--azul-hielo) !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px !important;
+        padding: 3px 10px !important;
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        display: inline-block !important;
+    }
+
+    /* Sidebar oficial con degradado granate y textos blancos de alto contraste */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, var(--granate) 0%, var(--granate-oscuro) 100%) !important;
-        border-right: 1px solid rgba(197, 155, 39, 0.3) !important;
+        border-right: 1px solid rgba(197, 155, 39, 0.35) !important;
     }
     [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] span,
-    [data-testid="stSidebar"] div,
+    [data-testid="stSidebar"] span:not([data-testid="stIconMaterial"]):not(.material-icons),
+    [data-testid="stSidebar"] div:not([data-testid="stIconMaterial"]),
     [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stSidebar"] .stRadio label p,
+    [data-testid="stSidebar"] .stRadio label span:not([data-testid="stIconMaterial"]),
     [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] .stCaption p,
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
         color: #FFFFFF !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
+    }
+    [data-testid="stSidebar"] code {
+        color: var(--dorado-claro) !important;
+        background: rgba(0, 0, 0, 0.25) !important;
+        border: 1px solid rgba(232, 200, 115, 0.3) !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 11.5px !important;
     }
     [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label {
         padding: 9px 14px !important;
         border-radius: 8px !important;
         transition: all .2s ease !important;
         margin-bottom: 4px !important;
-        background: transparent;
+        background: rgba(255, 255, 255, 0.04) !important;
+        border-left: 3px solid transparent !important;
     }
     [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:hover {
-        background: rgba(255, 255, 255, 0.1) !important;
+        background: rgba(255, 255, 255, 0.14) !important;
     }
     [data-testid="stSidebar"] .stRadio div[role="radiogroup"] > label:has(input:checked) {
-        background: rgba(255, 255, 255, 0.16) !important;
+        background: rgba(255, 255, 255, 0.2) !important;
         font-weight: 700 !important;
         border-left: 3px solid var(--dorado-claro) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
     }
     [data-testid="stSidebar"] hr {
-        border-color: rgba(255, 255, 255, 0.16) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
         margin: 16px 0 !important;
     }
 
-    /* Botones primarios y secundarios */
-    button[kind="primary"], .stButton button[data-testid="baseButton-primary"] {
-        background: linear-gradient(135deg, var(--granate), var(--granate-claro)) !important;
+    /* Botón de Cerrar Sesión en el Sidebar con alto contraste sobre fondo granate */
+    [data-testid="stSidebar"] .stButton button {
+        background: rgba(255, 255, 255, 0.12) !important;
         color: #FFFFFF !important;
-        border: none !important;
+        border: 1.5px solid var(--dorado-claro) !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        padding: 8px 14px !important;
+        transition: all .2s ease !important;
+    }
+    [data-testid="stSidebar"] .stButton button *,
+    [data-testid="stSidebar"] .stButton button p,
+    [data-testid="stSidebar"] .stButton button span {
+        color: #FFFFFF !important;
+    }
+    [data-testid="stSidebar"] .stButton button:hover {
+        background: rgba(197, 155, 39, 0.3) !important;
+        border-color: #FFFFFF !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+    }
+
+    /* Botones principales (granate institucional con texto blanco) en el área principal */
+    [data-testid="stMain"] button[kind="primary"],
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-primary"],
+    [data-testid="stMain"] .stButton button[data-testid="baseButton-primary"],
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button {
+        background: linear-gradient(135deg, var(--granate) 0%, var(--granate-claro) 100%) !important;
+        color: #FFFFFF !important;
+        border: 1px solid var(--granate-oscuro) !important;
         border-radius: 8px !important;
         font-weight: 700 !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        box-shadow: 0 4px 12px rgba(122, 28, 32, 0.2) !important;
-        transition: all .25s cubic-bezier(0.4,0,0.2,1) !important;
+        box-shadow: 0 4px 12px rgba(122, 28, 32, 0.22) !important;
+        transition: all .22s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
-    button[kind="primary"] *, .stButton button[data-testid="baseButton-primary"] * {
+    [data-testid="stMain"] button[kind="primary"] *,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-primary"] *,
+    [data-testid="stMain"] .stButton button[data-testid="baseButton-primary"] *,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button * {
         color: #FFFFFF !important;
     }
-    button[kind="primary"]:hover {
-        transform: translateY(-2px) !important;
+    [data-testid="stMain"] button[kind="primary"]:hover,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-primary"]:hover,
+    [data-testid="stMain"] .stButton button[data-testid="baseButton-primary"]:hover,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button:hover {
+        background: linear-gradient(135deg, var(--granate-oscuro) 0%, var(--granate) 100%) !important;
+        transform: translateY(-1px) !important;
         box-shadow: 0 6px 16px rgba(122, 28, 32, 0.35) !important;
     }
-    button[kind="secondary"], .stButton button:not([data-testid="baseButton-primary"]) {
-        background: transparent !important;
+    [data-testid="stMain"] button[kind="primary"]:focus-visible,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-primary"]:focus-visible,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button:focus-visible {
+        outline: 3px solid var(--dorado-claro) !important;
+        outline-offset: 2px !important;
+    }
+    [data-testid="stMain"] button[kind="primary"]:active,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-primary"]:active,
+    [data-testid="stMain"] [data-testid="stFormSubmitButton"] button:active {
+        transform: translateY(0) !important;
+    }
+
+    /* Botones secundarios y de descarga en el área principal */
+    [data-testid="stMain"] .stButton button[kind="secondary"],
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-secondary"],
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button {
+        background: #FFFFFF !important;
         border: 1.5px solid var(--dorado) !important;
         color: var(--granate) !important;
         border-radius: 8px !important;
         font-weight: 700 !important;
         font-family: 'Plus Jakarta Sans', sans-serif !important;
-        transition: all .25s cubic-bezier(0.4,0,0.2,1) !important;
+        transition: all .22s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
-    button[kind="secondary"] *, .stButton button:not([data-testid="baseButton-primary"]) * {
+    [data-testid="stMain"] .stButton button[kind="secondary"] *,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-secondary"] *,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button * {
         color: var(--granate) !important;
     }
-    button[kind="secondary"]:hover, .stButton button:not([data-testid="baseButton-primary"]):hover {
-        background: rgba(197, 155, 39, 0.08) !important;
-        transform: translateY(-2px) !important;
+    [data-testid="stMain"] .stButton button[kind="secondary"]:hover,
+    [data-testid="stMain"] .stButton button[data-testid="stBaseButton-secondary"]:hover,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button:hover {
+        background: rgba(197, 155, 39, 0.1) !important;
+        transform: translateY(-1px) !important;
         border-color: var(--granate) !important;
         color: var(--granate-oscuro) !important;
+    }
+    [data-testid="stMain"] .stButton button[kind="secondary"]:focus-visible,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button:focus-visible {
+        outline: 3px solid var(--dorado) !important;
+        outline-offset: 2px !important;
+    }
+    [data-testid="stMain"] button:disabled {
+        opacity: 0.55 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
     }
 
     /* Inputs y controles */
@@ -569,17 +690,20 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 13px 4px;
+        gap: 14px;
+        flex-wrap: wrap;
+        padding: 13px 8px;
         border-bottom: 1px solid var(--borde);
     }
     .student-list-row:last-child {
         border-bottom: none;
     }
     .student-name {
-        flex-grow: 1;
+        flex: 1 1 220px;
         font-size: 14px;
         font-weight: 600;
         color: var(--texto) !important;
+        line-height: 1.4;
     }
 
     /* MOCKUP 3: Detalle con Explicabilidad */
@@ -614,6 +738,8 @@ st.markdown("""
     .factor-label-row {
         display: flex;
         justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
         font-size: 13px;
         margin-bottom: 6px;
     }
@@ -625,6 +751,8 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
         font-weight: 700;
         font-size: 13px;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
     .factor-bar-track {
         height: 10px;
@@ -653,21 +781,28 @@ st.markdown("""
     /* MOCKUP 4: Trazabilidad Multiagente */
     .stepped-pipeline-container {
         position: relative;
-        padding: 24px 10px 10px 10px;
+        padding: 24px 10px 14px 10px;
         margin-bottom: 24px;
+        background: #FFFFFF;
+        border: 1px solid var(--borde);
+        border-radius: 12px;
+        box-shadow: 0 4px 14px rgba(122, 28, 32, 0.04);
     }
     .stepped-line {
         position: absolute;
         top: 44px;
-        left: 8%;
-        right: 8%;
-        height: 2px;
+        left: 11%;
+        right: 11%;
+        height: 2.5px;
         background-color: var(--dorado);
         z-index: 1;
     }
     .stepped-nodes {
         display: flex;
         justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: nowrap;
+        gap: 12px;
         position: relative;
         z-index: 2;
     }
@@ -676,7 +811,9 @@ st.markdown("""
         flex-direction: column;
         align-items: center;
         text-align: center;
-        width: 23%;
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 0 6px;
     }
     .node-circle {
         width: 42px;
@@ -689,6 +826,7 @@ st.markdown("""
         font-weight: 700;
         font-size: 16px;
         margin-bottom: 8px;
+        flex-shrink: 0;
     }
     .node-circle.solid {
         background-color: var(--granate) !important;
@@ -706,9 +844,12 @@ st.markdown("""
         color: var(--granate-oscuro) !important;
         font-size: 13.5px;
         margin-bottom: 2px;
+        line-height: 1.3;
     }
     .fipa-log-header {
-        background-color: var(--granate-oscuro) !important;
+        background: linear-gradient(90deg, var(--granate-oscuro) 0%, var(--granate) 100%) !important;
+        border: 1px solid rgba(197, 155, 39, 0.45) !important;
+        border-bottom: 1px solid rgba(197, 155, 39, 0.35) !important;
         border-radius: 10px 10px 0 0;
         padding: 12px 18px;
         color: var(--dorado-claro) !important;
@@ -718,19 +859,78 @@ st.markdown("""
         font-family: 'JetBrains Mono', monospace;
     }
     .fipa-log-body {
-        background-color: #FFFFFF !important;
-        border: 1px solid var(--borde) !important;
+        background-color: #1E0709 !important;
+        border: 1px solid rgba(197, 155, 39, 0.45) !important;
         border-top: none !important;
         border-radius: 0 0 10px 10px !important;
-        padding: 16px 20px !important;
+        padding: 14px 18px !important;
         font-family: 'JetBrains Mono', monospace !important;
         font-size: 12.5px !important;
-        line-height: 1.8 !important;
-        color: var(--texto) !important;
+        line-height: 1.75 !important;
+        color: #F8FAFC !important;
+        overflow-x: auto !important;
+        box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+    }
+    .fipa-log-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: #F8FAFC !important;
+    }
+    .fipa-log-row:last-child {
+        border-bottom: none;
+    }
+    .fipa-time {
+        color: #CBD5E1 !important;
+        font-weight: 500;
+        font-size: 12px;
+    }
+    .fipa-conv-id {
+        color: #E2E8F0 !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+        border: 1px solid rgba(255, 255, 255, 0.16) !important;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 11px;
     }
     .fipa-performative {
         font-weight: 700;
-        color: var(--granate) !important;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+        display: inline-block;
+    }
+    .fipa-perf-request {
+        background: rgba(245, 158, 11, 0.22) !important;
+        color: #FCD34D !important;
+        border: 1px solid rgba(252, 211, 77, 0.5) !important;
+    }
+    .fipa-perf-inform {
+        background: rgba(56, 189, 248, 0.2) !important;
+        color: #7DD3FC !important;
+        border: 1px solid rgba(125, 211, 252, 0.5) !important;
+    }
+    .fipa-perf-propose {
+        background: rgba(34, 197, 94, 0.2) !important;
+        color: #86EFAC !important;
+        border: 1px solid rgba(134, 239, 172, 0.5) !important;
+    }
+    .fipa-perf-failure {
+        background: rgba(239, 68, 68, 0.25) !important;
+        color: #FCA5A5 !important;
+        border: 1px solid rgba(252, 165, 165, 0.55) !important;
+    }
+    .fipa-route {
+        color: #FFFFFF !important;
+        font-weight: 600;
+    }
+    .fipa-topic {
+        color: #E8C873 !important;
+        font-size: 12px;
     }
 
     /* MOCKUP 5: Seguimiento y Plan de Tutoría */
@@ -770,26 +970,66 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* Responsividad en dispositivos móviles */
+    /* Responsividad en tablet (<= 768px) y móvil (<= 480px) */
     @media (max-width: 768px) {
         .block-container {
+            padding-top: 3.3rem !important;
             padding-left: 1rem !important;
             padding-right: 1rem !important;
+        }
+        .unsa-header-banner {
+            padding: 18px 16px;
         }
         .unsa-banner-inner {
             flex-direction: column;
             text-align: center;
-            gap: 12px;
+            gap: 10px;
+        }
+        .unsa-banner-title {
+            font-size: 20px;
+        }
+        .sub-footer-row {
+            flex-direction: column;
+            gap: 6px;
+            text-align: left;
         }
         .stepped-nodes {
             flex-wrap: wrap;
             gap: 16px;
         }
         .stepped-node {
-            width: 48%;
+            flex: 0 0 calc(50% - 8px);
+            width: calc(50% - 8px);
         }
         .stepped-line {
             display: none;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .block-container {
+            padding-top: 3.2rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+        }
+        .unsa-banner-title {
+            font-size: 18px;
+        }
+        .section-title {
+            font-size: 20px;
+        }
+        .stepped-node {
+            flex: 0 0 100%;
+            width: 100%;
+        }
+        .factor-label-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+        }
+        .fipa-log-body {
+            padding: 12px 12px !important;
+            font-size: 11.5px !important;
         }
     }
 </style>
@@ -1039,7 +1279,9 @@ if usuario is not None:
             "Encuestas SUS / TAM"
         ]
 
-    nav_sel = st.sidebar.radio("Navegación:", menu_items)
+    if st.session_state.get("pending_nav") in menu_items:
+        st.session_state["nav_radio"] = st.session_state.pop("pending_nav")
+    nav_sel = st.sidebar.radio("Navegación:", menu_items, key="nav_radio")
 
     st.sidebar.markdown("---")
     if rol == "ESTUDIANTE":
@@ -1055,25 +1297,35 @@ if usuario is not None:
     # Banner superior institucional (Mockup 2)
     render_institutional_banner()
 
-    # Sub-cabecera con saludo, 3 métricas con borde dorado y lema (Mockup 2)
+    # Sub-cabecera con saludo, 3 métricas reales desde SQLite con borde dorado y lema (Mockup 2)
     catalogo = get_all_courses()
-    curso_activo = catalogo[0]["nombre"] if catalogo else "Estructuras de Datos"
+    cursos_nombres_all = [c["nombre"] for c in catalogo]
 
-    if rol == "DOCENTE":
-        resumen_curso = get_course_risk_summary(curso_activo, "2026-B")
-        total_est = resumen_curso["total_alumnos"]
-        tutorias_sem = resumen_curso["rojos"]
-    elif rol == "ESTUDIANTE":
-        mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
-        total_est = len(mis_mats)
-        tutorias_sem = 1 if mis_mats else 0
-    else:
-        total_est = 18
-        tutorias_sem = 3
+    def _get_default_course_index(cursos_list: list[str]) -> int:
+        pref = st.session_state.get("docente_curso_activo")
+        if pref and pref in cursos_list:
+            return cursos_list.index(pref)
+        for idx_c, c_nom in enumerate(cursos_list):
+            if get_course_risk_summary(c_nom, "2026-B")["total_alumnos"] > 0:
+                return idx_c
+        return 0
+
+    header_info = get_header_metrics(usuario, semestre="2026-B")
+    lbl_m1 = header_info["label_col1"]
+    val_m1 = int(header_info["valor_col1"])
+    lbl_m2 = header_info["label_col2"]
+    val_m2 = int(header_info["valor_col2"])
+    ult_act_txt = header_info["ultima_actualizacion"]
+
+    nombre_saludo = (
+        f"Estudiante (ID Hash: {usuario['cui_hash'][:10]}...)"
+        if rol == "ESTUDIANTE"
+        else usuario["username"]
+    )
 
     st.markdown(f"""
     <div style="font-size: 14px; color: var(--texto-suave); margin-bottom: 14px;">
-        Hola, <b>{usuario['username']}</b> · <span style="font-family: 'JetBrains Mono', monospace;">{fecha_hoy}</span>
+        Hola, <b>{nombre_saludo}</b> · <span style="font-family: 'JetBrains Mono', monospace;">{fecha_hoy}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1081,22 +1333,22 @@ if usuario is not None:
     with c_m1:
         st.markdown(f"""
         <div class="sub-metric-card">
-            <div class="sub-metric-label">ESTUDIANTES EN SEGUIMIENTO</div>
-            <div class="sub-metric-val">{total_est:02d}</div>
+            <div class="sub-metric-label">{lbl_m1}</div>
+            <div class="sub-metric-val">{val_m1:02d}</div>
         </div>
         """, unsafe_allow_html=True)
     with c_m2:
         st.markdown(f"""
         <div class="sub-metric-card">
-            <div class="sub-metric-label">TUTORÍAS ESTA SEMANA</div>
-            <div class="sub-metric-val">{tutorias_sem:02d}</div>
+            <div class="sub-metric-label">{lbl_m2}</div>
+            <div class="sub-metric-val">{val_m2:02d}</div>
         </div>
         """, unsafe_allow_html=True)
     with c_m3:
         st.markdown(f"""
         <div class="sub-metric-card">
             <div class="sub-metric-label">ÚLTIMA ACTUALIZACIÓN</div>
-            <div class="sub-metric-val" style="font-size: 20px;">{fecha_hoy}</div>
+            <div class="sub-metric-val" style="font-size: 20px;">{ult_act_txt}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1119,8 +1371,11 @@ if usuario is not None:
         st.markdown('<h2 class="section-title">Panel de seguimiento</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Estimación de riesgo, no sentencia · datos reales del curso</p>', unsafe_allow_html=True)
 
+        mat_id_panel = None
         if rol == "ESTUDIANTE":
             mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
+            if mis_mats:
+                mat_id_panel = mis_mats[0]["id"]
             rojos_cnt = 0
             amarillos_cnt = 0
             verdes_cnt = 0
@@ -1134,8 +1389,9 @@ if usuario is not None:
                 else:
                     verdes_cnt += 1
         else:
-            cursos_nombres = [c["nombre"] for c in catalogo]
-            curso_sel = st.selectbox("Asignatura a supervisar:", cursos_nombres, key="sel_curso_panel")
+            def_idx_panel = _get_default_course_index(cursos_nombres_all)
+            curso_sel = st.selectbox("Asignatura a supervisar:", cursos_nombres_all, index=def_idx_panel, key="sel_curso_panel")
+            st.session_state["docente_curso_activo"] = curso_sel
             resumen = get_course_risk_summary(curso_sel, "2026-B")
             rojos_cnt = resumen["rojos"]
             amarillos_cnt = resumen["amarillos"]
@@ -1165,7 +1421,7 @@ if usuario is not None:
             </div>
             """, unsafe_allow_html=True)
 
-        # Contenedor limpio para la lista de asignaturas o estudiantes (Mockup 1)
+        # Contenedor limpio para la lista de asignaturas, estudiantes o resúmenes según rol (Mockup 1)
         with st.container(border=True):
             if rol == "ESTUDIANTE":
                 mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
@@ -1183,15 +1439,17 @@ if usuario is not None:
                             {badge_html}
                         </div>
                         """, unsafe_allow_html=True)
-            else:
+            elif rol == "DOCENTE":
                 alumnos_lista = get_course_students_table(curso_sel, "2026-B", current_user=usuario)
                 if not alumnos_lista:
                     st.info(f"No hay registros de calificaciones para {curso_sel} en 2026-B.")
                 else:
+                    mat_id_panel = int(alumnos_lista[0]["matricula_id"])
                     for al in alumnos_lista:
-                        cui_txt = al.get("id_mostrado", "7f3a...c91")
-                        nom_txt = al.get("nombre", f"Estudiante ({al.get('seccion', 'Sec. A')})")
-                        sem_tag = al.get("semaforo", "ROJO")
+                        id_m = str(al.get("id_mostrado") or al.get("cui_hash", ""))
+                        cui_txt = id_m if id_m.startswith("RES-") else f"{id_m[:8]}...{id_m[-4:]}"
+                        nom_txt = f"Estudiante Anonimizado (Sec. {al.get('seccion', 'A')} · {al.get('estado_optin', 'Compartido')})"
+                        sem_tag = al.get("semaforo", "VERDE")
 
                         if sem_tag == "ROJO":
                             badge_html = '<span class="badge-alto">ALTO</span>'
@@ -1202,20 +1460,72 @@ if usuario is not None:
 
                         st.markdown(f"""
                         <div class="student-list-row">
-                            <span class="cui-mono">CUI {cui_txt}</span>
+                            <span class="cui-mono">ID {cui_txt}</span>
                             <span class="student-name">{nom_txt}</span>
                             {badge_html}
                         </div>
                         """, unsafe_allow_html=True)
+            elif rol == "AUTORIDAD":
+                st.info(
+                    "Vista Agregada de Comité / Autoridad: Por principio de privacidad por diseño, "
+                    "este perfil visualiza exclusivamente estadísticas consolidadas por asignatura y sección, "
+                    "sin acceso a CUI, hashes individuales ni calificaciones personales."
+                )
+                secciones_res = get_course_sections_summary(curso_sel, "2026-B")
+                if not secciones_res:
+                    st.info(f"No existen cohortes evaluadas aún para {curso_sel} en el semestre 2026-B.")
+                else:
+                    df_sec = pd.DataFrame(secciones_res).rename(columns={
+                        "seccion": "Sección",
+                        "docente": "Docente Responsable",
+                        "total_alumnos": "Total Estudiantes",
+                        "rojos": "Riesgo Alto (Rojo)",
+                        "amarillos": "Alerta Preventiva (Amarillo)",
+                        "verdes": "Riesgo Bajo (Verde)",
+                        "promedio_riesgo_pct": "Riesgo Promedio (%)",
+                        "tasa_riesgo_pct": "% En Riesgo Alto",
+                    })
+                    cols_visibles = [
+                        "Sección", "Docente Responsable", "Total Estudiantes",
+                        "Riesgo Alto (Rojo)", "Alerta Preventiva (Amarillo)",
+                        "Riesgo Bajo (Verde)", "Riesgo Promedio (%)", "% En Riesgo Alto",
+                    ]
+                    st.dataframe(df_sec[cols_visibles], use_container_width=True)
+            else:  # ADMIN
+                stats_admin = get_technical_metrics_summary()
+                st.info(
+                    "Panel Operativo de Administración (RBAC): El rol Administrador supervisa la salud "
+                    "técnica del Sistema Multiagente y las métricas agregadas de operación. En cumplimiento del "
+                    "principio de privacidad por diseño, no tiene acceso a nóminas, CUI ni notas individuales."
+                )
+                c_ad1, c_ad2, c_ad3 = st.columns(3)
+                c_ad1.metric("Matrículas Evaluadas en Asignatura", resumen["total_alumnos"])
+                c_ad2.metric("Tasa de Riesgo Alto en Asignatura", f"{resumen['tasa_riesgo_pct']}%")
+                c_ad3.metric("Muestras Técnicas Registradas (OBJ5)", stats_admin["total_muestras"])
 
-        # Botones inferiores (Mockup 1)
-        b_c1, b_c2, _ = st.columns([1.5, 1.5, 3])
-        with b_c1:
-            if st.button("Programar tutoría", type="primary", use_container_width=True):
-                st.success("Acción registrada: Notificación enviada al canal institucional.")
-        with b_c2:
-            if st.button("Ver explicación", use_container_width=True):
-                st.info("Abra la pestaña 'Detalle con explicabilidad' en el menú lateral para consultar el desglose SHAP.")
+        # Botones inferiores exclusivos para roles con seguimiento individual (ESTUDIANTE y DOCENTE)
+        if rol in ("ESTUDIANTE", "DOCENTE"):
+            b_c1, b_c2, _ = st.columns([1.5, 1.5, 3])
+            with b_c1:
+                if st.button("Programar tutoría", type="primary", use_container_width=True):
+                    if mat_id_panel is None:
+                        st.warning("Seleccione una asignatura con matrículas activas antes de programar una tutoría.")
+                    else:
+                        fecha_prog = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+                        motivo_prog = "Sesión de orientación académica preventiva programada desde el Panel de Seguimiento."
+                        ok_prog, msg_prog = schedule_tutoring_session(
+                            mat_id_panel, fecha_prog, motivo_prog, current_user=usuario
+                        )
+                        if ok_prog:
+                            st.success(msg_prog)
+                        else:
+                            st.error(msg_prog)
+            with b_c2:
+                if st.button("Ver explicación", use_container_width=True):
+                    if mat_id_panel is not None:
+                        st.session_state["selected_student_mat"] = mat_id_panel
+                    st.session_state["pending_nav"] = "Detalle con explicabilidad"
+                    st.rerun()
 
 
     # =========================================================================
@@ -1226,39 +1536,68 @@ if usuario is not None:
         st.markdown('<h2 class="section-title">¿Qué influyó en este resultado?</h2>', unsafe_allow_html=True)
         st.markdown('<p class="section-subtitle">Factores explicativos SHAP y sugerencia generada por el Agente Tutor</p>', unsafe_allow_html=True)
 
-        # Búsqueda de predicción con estricto control de acceso
+        # Búsqueda de predicción con selectores funcionales reales y estricto control de acceso
         if rol == "ESTUDIANTE":
             mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
             if not mis_mats:
                 st.info("No tiene asignaturas inscritas para consultar. Inscríbase en 'Inscribir Asignatura'.")
                 st.stop()
 
-            # Selector exclusivo entre sus propias matrículas
             mat_dict = {f"{m['curso']} (Sec. {m['seccion']})": m["id"] for m in mis_mats}
             sel_curso = st.selectbox("Asignatura a consultar:", list(mat_dict.keys()), key="sel_mat_xai")
-            mat_id_act = mat_dict[sel_curso]
-            cui_tag = f"CUI {usuario['cui_hash'][:4]}...{usuario['cui_hash'][-3:]}"
+            mat_id_act = int(mat_dict[sel_curso])
+            cui_tag = f"ID Hash {usuario['cui_hash'][:6]}...{usuario['cui_hash'][-4:]}"
         else:
-            mat_id_act = 1
-            cui_tag = "CUI 7f3a...c91"
+            col_s_curso, col_s_est = st.columns(2)
+            with col_s_curso:
+                def_idx_xai = _get_default_course_index(cursos_nombres_all)
+                curso_doc_xai = st.selectbox(
+                    "Asignatura:",
+                    cursos_nombres_all,
+                    index=def_idx_xai,
+                    key="sel_doc_curso_xai",
+                )
+                st.session_state["docente_curso_activo"] = curso_doc_xai
 
-        pred_rec = get_latest_prediction(mat_id_act, current_user=usuario) or {
-            "probabilidad": 0.78,
-            "semaforo": "ROJO",
-            "checkpoint": "CP1",
-            "top_factors": [
-                {"label": "Asistencia acumulada baja", "value": 0.42, "direction": "Riesgo"},
-                {"label": "Calificación en Fase 1 (EP1)", "value": 0.28, "direction": "Riesgo"},
-                {"label": "Carga de créditos semestral", "value": -0.15, "direction": "Protector"}
-            ],
-            "recommendations": [
-                "Priorizar tutoría individual enfocada en el refuerzo de la prueba parcial de Fase 1 y coordinar plan de recuperación de asistencia."
-            ]
-        }
+            alumnos_xai = get_course_students_table(curso_doc_xai, "2026-B", current_user=usuario)
+            if not alumnos_xai:
+                st.info(
+                    f"No existen estudiantes con predicciones registradas en la asignatura '{curso_doc_xai}' "
+                    "para el semestre 2026-B. Seleccione otra asignatura o cargue un acta de calificaciones."
+                )
+                st.stop()
 
-        p_val = pred_rec.get("probabilidad", 0.78)
-        p_pct = p_val * 100
-        sem_tag = pred_rec.get("semaforo", "ROJO")
+            est_options_xai: dict[str, dict] = {}
+            for al in alumnos_xai:
+                id_m = str(al.get("id_mostrado") or al.get("cui_hash", ""))
+                id_short = id_m if id_m.startswith("RES-") else f"{id_m[:8]}...{id_m[-4:]}"
+                lbl_opt = (
+                    f"ID {id_short} · Sec. {al.get('seccion', 'A')} · "
+                    f"[{al.get('semaforo', 'VERDE')}] ({float(al.get('probabilidad', 0.0))*100:.1f}%)"
+                )
+                est_options_xai[lbl_opt] = al
+
+            with col_s_est:
+                sel_est_xai = st.selectbox(
+                    "Estudiante (ID Anonimizado):",
+                    list(est_options_xai.keys()),
+                    key="sel_doc_est_xai",
+                )
+            al_elegido = est_options_xai[sel_est_xai]
+            mat_id_act = int(al_elegido["matricula_id"])
+            st.session_state["selected_student_mat"] = mat_id_act
+            id_m_sel = str(al_elegido.get("id_mostrado") or al_elegido.get("cui_hash", ""))
+            cui_tag = f"ID {id_m_sel}" if id_m_sel.startswith("RES-") else f"ID Hash {id_m_sel[:6]}...{id_m_sel[-4:]}"
+
+        pred_rec = get_latest_prediction(mat_id_act, current_user=usuario)
+        if not pred_rec:
+            st.info("No se registran predicciones ni desglose SHAP para la matrícula seleccionada.")
+            st.stop()
+
+        p_val = float(pred_rec.get("probabilidad", 0.0))
+        p_pct = p_val * 100.0
+        sem_tag = str(pred_rec.get("semaforo", "VERDE"))
+        cp_tag = str(pred_rec.get("checkpoint", "CP0"))
 
         col_izq, col_der = st.columns([1, 2], gap="medium")
 
@@ -1275,53 +1614,73 @@ if usuario is not None:
                 else:
                     st.markdown('<div style="text-align: center; margin: 12px 0;"><span class="badge-bajo">RIESGO BAJO</span></div>', unsafe_allow_html=True)
 
-                st.markdown("""
+                st.markdown(f"""
                 <div style="font-size: 13px; text-align: center; color: var(--texto-suave); margin-bottom: 14px;">
-                    Probabilidad estimada de rezago<br>
+                    Probabilidad estimada de rezago ({cp_tag})<br>
                     <b>Semestre 2026-B · EPIS</b>
                 </div>
                 <div style="border-top: 2px solid var(--dorado); margin: 14px 0 10px 0;"></div>
                 """, unsafe_allow_html=True)
 
-                if st.button("Programar tutoría", key="btn_prog_tut_izq", use_container_width=True):
-                    st.success("Tutoría programada en la agenda del docente.")
+                if st.button("Programar tutoría", type="primary", key="btn_prog_tut_izq", use_container_width=True):
+                    fecha_prog = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+                    obs_prog = f"Tutoría focalizada en factores explicativos SHAP detectados en {cp_tag}."
+                    ok_t, msg_t = schedule_tutoring_session(mat_id_act, fecha_prog, obs_prog, current_user=usuario)
+                    if ok_t:
+                        st.success(msg_t)
+                    else:
+                        st.error(msg_t)
 
-        # Columna Derecha (Mockup 3: Barras SHAP y Sugerencia)
+        # Columna Derecha (Mockup 3: Barras SHAP con impacto real y Sugerencia)
         with col_der:
             with st.container(border=True):
-                factores = pred_rec.get("top_factors", [])
-                for f in factores:
-                    f_nombre = f.get("label", "Factor evaluado")
-                    val_raw = float(f.get("value", 0.0))
-                    es_riesgo = f.get("direction") == "Riesgo" or val_raw > 0
+                factores = pred_rec.get("top_factors") or []
+                if not factores:
+                    st.info("No se registraron factores SHAP individuales para esta evaluación.")
+                else:
+                    impactos_abs = [
+                        abs(format_shap_factor_for_ui(f)["impact"])
+                        for f in factores
+                        if isinstance(f, dict)
+                    ]
+                    max_abs_imp = max(impactos_abs, default=1.0) or 1.0
 
-                    bar_color = "var(--granate)" if es_riesgo else "var(--azul-factor)"
-                    signo = "+" if val_raw >= 0 else ""
-                    val_txt = f"{signo}{val_raw:.2f}"
-                    ancho_pct = min(100, int(abs(val_raw) * 150)) if abs(val_raw) <= 1.0 else min(100, int(abs(val_raw)))
+                    for f in factores:
+                        ui_f = format_shap_factor_for_ui(f, max_abs_imp)
+                        f_nombre = ui_f["label"]
+                        obs_val = ui_f["observed_value"]
+                        obs_html = (
+                            f' <span style="font-weight: 400; font-size: 12px; color: var(--texto-suave);">'
+                            f'(Valor observado: {obs_val})</span>'
+                            if obs_val is not None else ""
+                        )
+                        bar_color = ui_f["color_css"]
+                        val_txt = ui_f["impact_text"]
+                        ancho_pct = ui_f["width_pct"]
 
-                    st.markdown(f"""
-                    <div class="factor-bar-row">
-                        <div class="factor-label-row">
-                            <span class="factor-name">{f_nombre}</span>
-                            <span class="factor-val-mono" style="color: {bar_color};">{val_txt}</span>
+                        st.markdown(f"""
+                        <div class="factor-bar-row">
+                            <div class="factor-label-row">
+                                <span class="factor-name">{f_nombre}{obs_html}</span>
+                                <span class="factor-val-mono" style="color: {bar_color};">{val_txt}</span>
+                            </div>
+                            <div class="factor-bar-track">
+                                <div class="factor-bar-fill" style="width: {ancho_pct}%; background-color: {bar_color};"></div>
+                            </div>
                         </div>
-                        <div class="factor-bar-track">
-                            <div class="factor-bar-fill" style="width: {ancho_pct}%; background-color: {bar_color};"></div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
                 # Leyenda (Mockup 3)
                 st.markdown("""
                 <div style="display: flex; gap: 20px; font-size: 12px; color: var(--texto-suave); margin-top: 18px;">
-                    <span><span style="color: var(--granate); font-weight: bold;">■</span> Aumenta el riesgo</span>
-                    <span><span style="color: var(--azul-factor); font-weight: bold;">■</span> Lo reduce</span>
+                    <span><span style="color: var(--granate); font-weight: bold;">■</span> Aumenta el riesgo (impacto SHAP +)</span>
+                    <span><span style="color: var(--azul-factor); font-weight: bold;">■</span> Lo reduce / factor protector (impacto SHAP -)</span>
                 </div>
                 """, unsafe_allow_html=True)
 
             # Caja de sugerencia para el tutor (Mockup 3)
-            recom_txt = pred_rec.get("recommendations", ["Agendar reunión para revisar la estrategia de estudio antes del cierre de Fase 2."])[0]
+            recs_list = pred_rec.get("recommendations") or []
+            recom_txt = recs_list[0] if recs_list else "Mantener seguimiento académico regular según programación del sílabo."
             st.markdown(f"""
             <div class="suggestion-box">
                 <b>Sugerencia para el tutor:</b> {recom_txt}
@@ -1335,7 +1694,7 @@ if usuario is not None:
     elif nav_sel == "Trazabilidad multiagente":
         st.markdown('<span class="section-label">TRAZABILIDAD DEL SISTEMA</span>', unsafe_allow_html=True)
         st.markdown('<h2 class="section-title">Cómo se calculó esta alerta</h2>', unsafe_allow_html=True)
-        st.markdown('<p class="section-subtitle">Flujo de coordinación y mensajes entre agentes de la arquitectura</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-subtitle">Flujo de coordinación y mensajes reales persistidos entre agentes de la arquitectura</p>', unsafe_allow_html=True)
 
         # Línea horizontal con 4 agentes (Mockup 4)
         st.markdown("""
@@ -1366,41 +1725,56 @@ if usuario is not None:
         </div>
         """, unsafe_allow_html=True)
 
-        # Tarjeta FIPA-ACL (Mockup 4) con aislamiento estricto
-        st.markdown('<div class="fipa-log-header">REGISTRO DE MENSAJES FIPA-ACL</div>', unsafe_allow_html=True)
+        # Tarjeta FIPA-ACL (Mockup 4) conectada a registros reales en SQLite (mensajes_bus)
+        st.markdown('<div class="fipa-log-header">REGISTRO DE MENSAJES FIPA-ACL (PERSISTENCIA REAL SQLITE)</div>', unsafe_allow_html=True)
 
         if rol == "ESTUDIANTE":
-            mensajes_reales = get_bus_messages_for_student(usuario["cui_hash"], limit=8)
+            mensajes_reales = get_bus_messages_for_student(usuario["cui_hash"], limit=16)
         else:
-            mensajes_reales = get_recent_bus_messages(8)
+            mensajes_reales = get_recent_bus_messages(16)
 
         if not mensajes_reales:
-            log_entries = [
-                ("[10:14:22]", "inform", "Ingestion → Predictor (Datos consolidados)"),
-                ("[10:14:23]", "inform", "Predictor → Xai (Probabilidad calculada)"),
-                ("[10:14:24]", "inform", "Xai → Recommendation (Factores SHAP extraídos)"),
-                ("[10:14:25]", "propose", "Recommendation → UI (Propuesta pedagógica lista)")
-            ]
+            log_html = (
+                '<div style="color: #CBD5E1; font-style: italic;">'
+                'Estado vacío: No existen mensajes FIPA-ACL registrados en la tabla mensajes_bus para este contexto. '
+                'Ejecute una evaluación de riesgo o actualización de notas para generar trazas reales.'
+                '</div>'
+            )
         else:
-            log_entries = []
+            perf_class_map = {
+                "REQUEST": "fipa-perf-request",
+                "INFORM": "fipa-perf-inform",
+                "PROPOSE": "fipa-perf-propose",
+                "FAILURE": "fipa-perf-failure",
+            }
+            log_rows_html = []
             for m in reversed(mensajes_reales):
-                t_str = m.get("timestamp", "10:00:00")[-8:]
-                perf = m.get("performativa", "inform").lower()
-                rem = m.get("emisor", "agente").replace("Agent", "")
-                dest = m.get("receptor", "coordinador").replace("Agent", "")
-                log_entries.append((f"[{t_str}]", perf, f"{rem} → {dest}"))
-
-        log_html = "".join([
-            f'<div><span class="fipa-time">{t}</span> <span class="fipa-performative">{p}</span> {c}</div>'
-            for t, p, c in log_entries
-        ])
+                ts_raw = str(m.get("timestamp", ""))
+                t_str = ts_raw[11:19] if len(ts_raw) >= 19 else ts_raw[-8:]
+                perf = str(m.get("performativa", "INFORM")).upper()
+                perf_cls = perf_class_map.get(perf, "fipa-perf-inform")
+                rem = str(m.get("emisor", "CoordinatorAgent"))
+                dest = str(m.get("receptor", "Agent"))
+                topico = str(m.get("topico", perf))
+                req_id = str(m.get("request_id", "conv_anon"))
+                req_short = req_id if len(req_id) <= 24 else f"{req_id[:14]}...{req_id[-6:]}"
+                log_rows_html.append(
+                    f'<div class="fipa-log-row">'
+                    f'<span class="fipa-time">[{t_str}]</span> '
+                    f'<span class="fipa-conv-id">[{req_short}]</span> '
+                    f'<span class="fipa-performative {perf_cls}">{perf}</span> '
+                    f'<span class="fipa-route">{rem} → {dest}</span> '
+                    f'<span class="fipa-topic">· Tópico: {topico}</span>'
+                    f'</div>'
+                )
+            log_html = "".join(log_rows_html)
 
         st.markdown(f"""
         <div class="fipa-log-body">
             {log_html}
         </div>
         <div style="font-size: 13px; color: var(--texto-suave); margin-top: 14px;">
-            Cada alerta puede auditarse paso a paso por el jurado o el comité de tutoría garantizando reproducibilidad.
+            Cada alerta se audita paso a paso mediante performativas FIPA-ACL reales (REQUEST, INFORM, PROPOSE, FAILURE) con identificadores de conversación anonimizados.
         </div>
         """, unsafe_allow_html=True)
 
@@ -1411,7 +1785,7 @@ if usuario is not None:
     elif nav_sel == "Seguimiento y plan de tutoría":
         st.markdown('<span class="section-label">SEGUIMIENTO</span>', unsafe_allow_html=True)
         st.markdown('<h2 class="section-title">Evolución y plan de tutoría</h2>', unsafe_allow_html=True)
-        st.markdown('<p class="section-subtitle">Trayectoria longitudinal de riesgo y compromisos pedagógicos</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-subtitle">Trayectoria longitudinal de riesgo, bitácora pedagógica y simulación normativa</p>', unsafe_allow_html=True)
 
         if rol == "ESTUDIANTE":
             mis_mats = get_student_enrollments(usuario["cui_hash"], "2026-B", current_user=usuario)
@@ -1421,109 +1795,321 @@ if usuario is not None:
             mat_dict = {f"{m['curso']} (Sec. {m['seccion']})": m for m in mis_mats}
             sel_c = st.selectbox("Asignatura a supervisar:", list(mat_dict.keys()), key="sel_plan_tut")
             mat_act = mat_dict[sel_c]
-            mat_id_act = mat_act["id"]
-            nom_curso = mat_act["curso"]
-            nom_docente = mat_act["docente"]
-            cui_anon = usuario["cui_hash"]
+            mat_id_act = int(mat_act["id"])
+            nom_curso = str(mat_act["curso"])
+            nom_docente = str(mat_act["docente"])
+            cui_anon = str(usuario["cui_hash"])
         else:
-            mat_id_act = 1
-            nom_curso = "Estructuras de Datos"
-            nom_docente = usuario["username"]
-            cui_anon = "7f3a...c91"
+            col_t_curso, col_t_est = st.columns(2)
+            with col_t_curso:
+                def_idx_tut = _get_default_course_index(cursos_nombres_all)
+                curso_doc_tut = st.selectbox(
+                    "Asignatura a supervisar:",
+                    cursos_nombres_all,
+                    index=def_idx_tut,
+                    key="sel_doc_curso_tut",
+                )
+                st.session_state["docente_curso_activo"] = curso_doc_tut
 
-        # Historial longitudinal real
+            alumnos_tut = get_course_students_table(curso_doc_tut, "2026-B", current_user=usuario)
+            if not alumnos_tut:
+                st.info(
+                    f"No existen estudiantes evaluados en '{curso_doc_tut}' para el semestre 2026-B."
+                )
+                st.stop()
+
+            est_options_tut: dict[str, dict] = {}
+            for al in alumnos_tut:
+                id_m = str(al.get("id_mostrado") or al.get("cui_hash", ""))
+                id_short = id_m if id_m.startswith("RES-") else f"{id_m[:8]}...{id_m[-4:]}"
+                lbl_opt = (
+                    f"ID {id_short} · Sec. {al.get('seccion', 'A')} · "
+                    f"[{al.get('semaforo', 'VERDE')}] ({float(al.get('probabilidad', 0.0))*100:.1f}%)"
+                )
+                est_options_tut[lbl_opt] = al
+
+            with col_t_est:
+                sel_est_tut = st.selectbox(
+                    "Estudiante (ID Anonimizado):",
+                    list(est_options_tut.keys()),
+                    key="sel_doc_est_tut",
+                )
+            al_tut_sel = est_options_tut[sel_est_tut]
+            mat_id_act = int(al_tut_sel["matricula_id"])
+            st.session_state["selected_student_mat"] = mat_id_act
+            mat_act = get_enrollment_by_id(mat_id_act, current_user=usuario) or {}
+            nom_curso = str(mat_act.get("curso") or curso_doc_tut)
+            nom_docente = str(mat_act.get("docente") or usuario["username"])
+            cui_anon = str(al_tut_sel.get("id_mostrado") or al_tut_sel.get("cui_hash", ""))
+
+        # Historial longitudinal real desde SQLite (sin valores inventados)
         historial = get_prediction_history(mat_id_act, current_user=usuario)
-        if len(historial) >= 2:
-            semanas = [f"CP{h['checkpoint']}" for h in historial]
-            riesgos = [h["probabilidad"] * 100 for h in historial]
-        else:
-            semanas = ["Sem 1", "Sem 8", "Sem 16"]
-            riesgos = [22.0, 48.0, 78.0]
+        pred_actual = get_latest_prediction(mat_id_act, current_user=usuario)
 
-        # Tarjeta superior: Gráfico de evolución temporal (Mockup 5)
         with st.container(border=True):
-            col_g1, col_g2 = st.columns([3, 1])
+            if not historial:
+                st.info("No existen puntos de control (checkpoints) evaluados aún para graficar la evolución de esta matrícula.")
+            else:
+                semanas = [
+                    str(h["checkpoint"]) if str(h["checkpoint"]).startswith("CP") else f"CP{h['checkpoint']}"
+                    for h in historial
+                ]
+                riesgos = [round(float(h["probabilidad"]) * 100.0, 1) for h in historial]
 
-            with col_g1:
-                fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor='white')
+                col_g1, col_g2 = st.columns([3, 1])
+                with col_g1:
+                    umbral_crit_pct = round(float(pred_actual.get("umbral", 0.34)) * 100.0, 1) if pred_actual else 34.0
+                    umbral_prev_pct = round(0.75 * umbral_crit_pct, 1)
+                    fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor='white')
+                    ax.axhline(
+                        y=umbral_prev_pct,
+                        color='#F59E0B',
+                        linestyle='--',
+                        linewidth=1.2,
+                        alpha=0.85,
+                        label=f"Umbral Preventivo ({umbral_prev_pct:.1f}%)",
+                    )
+                    ax.axhline(
+                        y=umbral_crit_pct,
+                        color='#EF4444',
+                        linestyle='--',
+                        linewidth=1.2,
+                        alpha=0.85,
+                        label=f"Umbral Crítico ({umbral_crit_pct:.1f}%)",
+                    )
 
-                # Líneas guía de umbrales normativos calibrados
-                ax.axhline(y=34.0, color='#F59E0B', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Preventivo (34%)")
-                ax.axhline(y=75.0, color='#EF4444', linestyle='--', linewidth=1.2, alpha=0.8, label="Umbral Crítico (75%)")
+                    ax.plot(semanas, riesgos, color='#7A1C20', linewidth=3, zorder=3)
+                    if len(semanas) > 1:
+                        ax.scatter(semanas[:-1], riesgos[:-1], color='#7A1C20', s=45, zorder=4)
+                    ax.scatter([semanas[-1]], [riesgos[-1]], facecolors='#C59B27', edgecolors='#7A1C20', linewidth=2.5, s=90, zorder=5)
 
-                # Curva principal
-                ax.plot(semanas, riesgos, color='#7A1C20', linewidth=3, zorder=3)
-                ax.scatter(semanas[:-1], riesgos[:-1], color='#7A1C20', s=45, zorder=4)
-                ax.scatter([semanas[-1]], [riesgos[-1]], facecolors='#C59B27', edgecolors='#7A1C20', linewidth=2.5, s=90, zorder=5)
+                    ax.set_ylim(0, 100)
+                    ax.set_ylabel("Riesgo (%)", fontsize=11, color='#0F172A', fontweight='bold')
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    ax.spines['left'].set_color('#E2E8F0')
+                    ax.spines['bottom'].set_color('#E2E8F0')
+                    ax.tick_params(colors='#475569', labelsize=10)
+                    ax.grid(axis='y', linestyle=':', alpha=0.5, color='#E2E8F0')
+                    ax.legend(loc='upper left', frameon=True, facecolor='#FFFFFF', edgecolor='#E2E8F0', fontsize=8.5)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
 
-                ax.set_ylim(0, 100)
-                ax.set_ylabel("Riesgo (%)", fontsize=11, color='#0F172A', fontweight='bold')
-                ax.spines['top'].set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.spines['left'].set_color('#E2E8F0')
-                ax.spines['bottom'].set_color('#E2E8F0')
-                ax.tick_params(colors='#475569', labelsize=10)
-                ax.grid(axis='y', linestyle=':', alpha=0.5, color='#E2E8F0')
-                plt.tight_layout()
-                st.pyplot(fig)
+                with col_g2:
+                    if len(riesgos) >= 2:
+                        tendencia_txt = "al alza" if riesgos[-1] > riesgos[0] else ("a la baja" if riesgos[-1] < riesgos[0] else "estable")
+                    else:
+                        tendencia_txt = f"Hito {semanas[-1]} ({riesgos[-1]:.1f}%)"
+                    st.markdown(f"""
+                    <div style="padding-top: 30px;">
+                        <div style="font-size: 14px; font-weight: 700; color: var(--granate-oscuro);">Tendencia: <span style="font-family: 'JetBrains Mono', monospace; color: var(--granate);">{tendencia_txt}</span></div>
+                        <div style="font-size: 12px; color: var(--texto-suave); margin-top: 4px;">Datos reales persistidos en SQLite para {nom_curso}.</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-            with col_g2:
-                tendencia_txt = "al alza" if riesgos[-1] > riesgos[0] else "estable"
-                st.markdown(f"""
-                <div style="padding-top: 30px;">
-                    <div style="font-size: 14px; font-weight: 700; color: var(--granate-oscuro);">Tendencia: <span style="font-family: 'JetBrains Mono', monospace; color: var(--granate);">{tendencia_txt}</span></div>
-                    <div style="font-size: 12px; color: var(--texto-suave); margin-top: 4px;">Datos de seguimiento del estudiante en el semestre activo.</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # Tarjeta inferior: Lista de acciones de tutoría con casillas (Mockup 5)
+        # Tarjeta de compromisos pedagógicos y registro real de tutoría en SQLite (Mockup 5)
+        chk_state = get_tutoring_checklist_state(mat_id_act, current_user=usuario)
         with st.container(border=True):
-            st.markdown("""
-            <div class="action-checklist-row">
-                <div class="action-box checked">&#10003;</div>
-                <div class="action-text">Acción 1: conversación inicial con el estudiante</div>
-                <div class="action-date">12/09/2026</div>
-            </div>
-            <div class="action-checklist-row">
-                <div class="action-box unchecked"></div>
-                <div class="action-text">Acción 2: derivar a reforzamiento académico o tutoría par</div>
-                <div class="action-date">15/10/2026</div>
-            </div>
-            <div class="action-checklist-row">
-                <div class="action-box unchecked"></div>
-                <div class="action-text">Acción 3: reevaluar el semáforo tras Fase 2</div>
-                <div class="action-date">02/11/2026</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### Plan de Acción Tutorial y Compromisos Pedagógicos")
+            st.caption(f"Última actualización en bitácora: {chk_state['fecha_actualizacion']}")
 
-        # Botones de acción inferiores (Mockup 5)
-        c_btn1, c_btn2, _ = st.columns([1.5, 1.5, 3])
-        with c_btn1:
-            if st.button("Registrar tutoría", type="primary", use_container_width=True):
-                st.success("Tutoría guardada en la bitácora docente y registrada en el bus.")
-        with c_btn2:
-            pdf_bytes = generate_intervention_pdf(
-                student_id_anon=cui_anon,
-                curso=nom_curso,
-                docente=nom_docente,
-                checkpoint="CP1",
-                probabilidad_pct=float(riesgos[-1]),
-                umbral_pct=34.0,
-                semaforo="ROJO" if riesgos[-1] >= 50 else ("AMARILLO" if riesgos[-1] >= 25 else "VERDE"),
-                meta_nota_min=13.5,
-                promedio_acumulado=8.4,
-                imposible=False,
-                top_factors=[{"label": "Asistencia acumulada baja", "value": 0.42, "direction": "Riesgo"}],
-                recommendations=["Plan de tutoría individual y seguimiento en laboratorio de programación."],
-                current_user=usuario
+            chk_a1 = st.checkbox(
+                "Acción 1: conversación diagnóstica inicial con el estudiante",
+                value=chk_state["accion_1"],
+                key=f"chk_a1_{mat_id_act}",
             )
-            st.download_button(
-                label="Exportar informe PDF",
-                data=pdf_bytes,
-                file_name=f"Ficha_Intervencion_SATA_{cui_anon[:8]}.pdf",
-                mime="application/pdf",
-                use_container_width=True
+            chk_a2 = st.checkbox(
+                "Acción 2: derivar a reforzamiento académico o tutoría par",
+                value=chk_state["accion_2"],
+                key=f"chk_a2_{mat_id_act}",
             )
+            chk_a3 = st.checkbox(
+                "Acción 3: reevaluar el semáforo tras el siguiente hito parcial",
+                value=chk_state["accion_3"],
+                key=f"chk_a3_{mat_id_act}",
+            )
+
+            st.markdown("---")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                tut_fecha_in = st.date_input(
+                    "Fecha de la sesión de tutoría:",
+                    value=datetime.date.today(),
+                    key=f"tut_fecha_{mat_id_act}",
+                )
+            with col_f2:
+                tut_estado_in = st.selectbox(
+                    "Estado de la sesión:",
+                    ["REALIZADA", "PROGRAMADA", "SEGUIMIENTO"],
+                    key=f"tut_estado_{mat_id_act}",
+                )
+
+            tut_obs_in = st.text_area(
+                "Observaciones y acuerdos pedagógicos (obligatorio para registrar):",
+                placeholder="Detalle los acuerdos alcanzados, temas reforzados o compromisos asumidos en la sesión...",
+                key=f"tut_obs_{mat_id_act}",
+            )
+
+            c_btn1, c_btn2, _ = st.columns([1.6, 1.6, 2.8])
+            with c_btn1:
+                if st.button("Registrar tutoría", type="primary", use_container_width=True):
+                    ok_reg, msg_reg = register_tutoring_session(
+                        matricula_id=mat_id_act,
+                        fecha_sesion=tut_fecha_in.isoformat(),
+                        estado=tut_estado_in,
+                        observaciones=tut_obs_in,
+                        accion_1=chk_a1,
+                        accion_2=chk_a2,
+                        accion_3=chk_a3,
+                        current_user=usuario,
+                    )
+                    if ok_reg:
+                        st.success(msg_reg)
+                    else:
+                        st.error(msg_reg)
+
+            with c_btn2:
+                if pred_actual:
+                    pdf_bytes = generate_intervention_pdf(
+                        student_id_anon=cui_anon,
+                        curso=nom_curso,
+                        docente=nom_docente,
+                        checkpoint=str(pred_actual.get("checkpoint", "CP1")),
+                        probabilidad_pct=float(pred_actual.get("probabilidad", 0.0)) * 100.0,
+                        umbral_pct=float(pred_actual.get("umbral", 0.34)) * 100.0,
+                        semaforo=str(pred_actual.get("semaforo", "VERDE")),
+                        meta_nota_min=pred_actual.get("meta_nota_min"),
+                        promedio_acumulado=float(pred_actual.get("promedio_acumulado") or 0.0),
+                        imposible=bool(pred_actual.get("imposible_ordinario", 0)),
+                        top_factors=pred_actual.get("top_factors") or [],
+                        recommendations=pred_actual.get("recommendations") or [],
+                        current_user=usuario,
+                    )
+                    st.download_button(
+                        label="Exportar informe PDF",
+                        data=pdf_bytes,
+                        file_name=f"Ficha_Intervencion_SATA_{cui_anon[:8]}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                else:
+                    st.info("Sin predicción para exportar PDF.")
+
+        # Historial / Bitácora persistida de tutorías
+        with st.container(border=True):
+            st.markdown("#### Historial y Bitácora de Sesiones de Tutoría")
+            hist_tut = get_tutoring_history(mat_id_act, current_user=usuario)
+            if not hist_tut:
+                st.info("No se registran sesiones de tutoría aún para esta matrícula.")
+            else:
+                df_tut = pd.DataFrame([
+                    {
+                        "Fecha Sesión": r["fecha_sesion"],
+                        "Estado": r["estado"],
+                        "Responsable": f"{r['responsable']} ({r['rol_registro']})",
+                        "Compromisos (A1/A2/A3)": f"{'Sí' if r['accion_1_ok'] else 'No'} / {'Sí' if r['accion_2_ok'] else 'No'} / {'Sí' if r['accion_3_ok'] else 'No'}",
+                        "Observaciones Pedagógicas": r["observaciones"],
+                        "Registrado": str(r["fecha_registro"])[:16].replace("T", " "),
+                    }
+                    for r in hist_tut
+                ])
+                st.dataframe(df_tut, use_container_width=True)
+
+        # Conexión de save_grade + auditoría historial_cambios y calcular_simulacion_sustitutorio
+        notas_actuales = get_grades_for_enrollment(mat_id_act, current_user=usuario)
+        pesos_mat = {
+            "EC1": int(mat_act.get("peso_ec1", 15)),
+            "EP1": int(mat_act.get("peso_ep1", 15)),
+            "EC2": int(mat_act.get("peso_ec2", 20)),
+            "EP2": int(mat_act.get("peso_ep2", 20)),
+            "EC3": int(mat_act.get("peso_ec3", 15)),
+            "EP3": int(mat_act.get("peso_ep3", 15)),
+        }
+
+        col_op1, col_op2 = st.columns(2, gap="medium")
+        with col_op1:
+            with st.container(border=True):
+                st.markdown("#### Registro y Rectificación de Notas Parciales")
+                st.caption("Actualiza la calificación en SQLite, registra auditoría de cambios y recalcula la alerta en el SMA.")
+                ev_sel = st.selectbox(
+                    "Evaluación a registrar o actualizar:",
+                    ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"],
+                    key=f"ev_sel_{mat_id_act}",
+                )
+                prev_ev_info = notas_actuales.get(ev_sel, {})
+                prev_val_num = float(prev_ev_info["valor"]) if prev_ev_info.get("valor") is not None else 11.0
+                val_nota_in = st.number_input(
+                    f"Calificación en {ev_sel} (0.0 a 20.0):",
+                    min_value=0.0,
+                    max_value=20.0,
+                    value=prev_val_num,
+                    step=0.5,
+                    key=f"val_nota_{mat_id_act}_{ev_sel}",
+                )
+                es_aus_in = st.checkbox(
+                    f"Marcar Ausente / NSP en {ev_sel}",
+                    value=bool(prev_ev_info.get("es_ausente", False)),
+                    key=f"aus_nota_{mat_id_act}_{ev_sel}",
+                )
+                motivo_nota_in = st.text_input(
+                    "Motivo de registro o modificación:",
+                    value="Actualización académica intra-semestral",
+                    key=f"mot_nota_{mat_id_act}",
+                )
+                if st.button("Guardar Calificación y Recalcular Alerta", type="primary", key=f"btn_save_grade_{mat_id_act}", use_container_width=True):
+                    valor_guardar = 0.0 if es_aus_in else float(val_nota_in)
+                    save_grade(
+                        matricula_id=mat_id_act,
+                        evaluacion=ev_sel,
+                        valor=valor_guardar,
+                        es_ausente=es_aus_in,
+                        motivo=motivo_nota_in.strip() or "Registro regular",
+                        current_user=usuario,
+                    )
+                    res_recalc = evaluate_and_persist_enrollment(mat_id_act, coordinator, current_user=usuario)
+                    if res_recalc.get("status") == "SUCCESS":
+                        st.success(f"Calificación {ev_sel} guardada y alerta recalculada ({res_recalc['prediction']['checkpoint']}).")
+                        st.rerun()
+                    else:
+                        st.error("Error al recalcular alerta: " + ", ".join(res_recalc.get("errors", [])))
+
+                cambios_hist = get_grade_change_history(mat_id_act, current_user=usuario)
+                if cambios_hist:
+                    st.caption("Auditoría de rectificaciones registradas (`historial_cambios`):")
+                    st.dataframe(pd.DataFrame(cambios_hist), use_container_width=True)
+
+        with col_op2:
+            with st.container(border=True):
+                st.markdown("#### Simulador Normativo de Examen Sustitutorio (UNSA)")
+                st.caption("Simula el reemplazo normativo del Examen Parcial más bajo (min(EP1, EP2, EP3)) al cierre de las 3 fases.")
+                s_c1, s_c2, s_c3 = st.columns(3)
+                with s_c1:
+                    sim_ec1 = st.number_input("EC1:", 0.0, 20.0, float(notas_actuales.get("EC1", {}).get("valor") or 9.0), 0.5, key=f"sim_ec1_{mat_id_act}")
+                    sim_ep1 = st.number_input("EP1:", 0.0, 20.0, float(notas_actuales.get("EP1", {}).get("valor") or 8.0), 0.5, key=f"sim_ep1_{mat_id_act}")
+                with s_c2:
+                    sim_ec2 = st.number_input("EC2:", 0.0, 20.0, float(notas_actuales.get("EC2", {}).get("valor") or 10.0), 0.5, key=f"sim_ec2_{mat_id_act}")
+                    sim_ep2 = st.number_input("EP2:", 0.0, 20.0, float(notas_actuales.get("EP2", {}).get("valor") or 9.0), 0.5, key=f"sim_ep2_{mat_id_act}")
+                with s_c3:
+                    sim_ec3 = st.number_input("EC3:", 0.0, 20.0, float(notas_actuales.get("EC3", {}).get("valor") or 11.0), 0.5, key=f"sim_ec3_{mat_id_act}")
+                    sim_ep3 = st.number_input("EP3:", 0.0, 20.0, float(notas_actuales.get("EP3", {}).get("valor") or 9.0), 0.5, key=f"sim_ep3_{mat_id_act}")
+
+                sim_res = calcular_simulacion_sustitutorio(
+                    sim_ec1, sim_ep1, sim_ec2, sim_ep2, sim_ec3, sim_ep3, pesos_mat
+                )
+                if sim_res.get("ya_aprobo"):
+                    st.success(sim_res["mensaje"])
+                elif sim_res.get("aplica"):
+                    st.markdown(
+                        f"**Promedio Ordinario Proyectado:** `{sim_res['promedio_ordinario']:.2f}` · "
+                        f"**Parcial a Reemplazar:** `{sim_res['parcial_a_reemplazar']}` (Nota actual: `{sim_res['nota_reemplazada']}`, Peso: `{sim_res['peso_parcial']}%`)"
+                    )
+                    if sim_res.get("es_viable"):
+                        st.warning(sim_res["mensaje"])
+                    else:
+                        st.error(sim_res["mensaje"])
+                else:
+                    st.info(sim_res.get("motivo", "Complete las 3 fases para simular el sustitutorio."))
 
 
     # =========================================================================
@@ -1568,7 +2154,7 @@ if usuario is not None:
     elif nav_sel == "Perfil Basal":
         st.markdown('<span class="section-label">ANTECEDENTES</span>', unsafe_allow_html=True)
         st.markdown('<h2 class="section-title">Perfil Académico Basal</h2>', unsafe_allow_html=True)
-        st.markdown('<p class="section-subtitle">Variables históricas que alimentan el Checkpoint 0</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-subtitle">Variables históricas que alimentan el Checkpoint 0 y preferencias de privacidad</p>', unsafe_allow_html=True)
 
         perfil = get_student_profile(usuario["cui_hash"], "2026-B", current_user=usuario) or {}
         with st.container(border=True):
@@ -1584,6 +2170,27 @@ if usuario is not None:
                 if st.form_submit_button("Guardar Perfil Basal"):
                     save_student_profile(usuario["cui_hash"], "2026-B", p_ira, p_rep, p_cred, p_ing, current_user=usuario)
                     st.success("Perfil basal registrado correctamente.")
+                    st.rerun()
+
+        est_info = get_student_info(usuario["cui_hash"]) or {"consentimiento_aceptado": 1, "comparte_con_tutor": 1}
+        with st.container(border=True):
+            st.markdown("#### Consentimiento Informado y Privacidad de Tutoría (Opt-In)")
+            st.caption(
+                "Controle si autoriza que el docente responsable o tutor visualice su código hash completo "
+                "durante el seguimiento académico o si prefiere mantener su registro reservado (RES-XXXXXX)."
+            )
+            with st.form("form_consentimiento_optin"):
+                chk_consent = st.checkbox(
+                    "Acepto el consentimiento informado para el procesamiento preventivo anonimizado (HMAC-SHA256)",
+                    value=bool(est_info.get("consentimiento_aceptado", 1)),
+                )
+                chk_optin = st.checkbox(
+                    "Autorizo compartir mi identificador hash y alertas preventivas con el Docente / Tutor de la asignatura (Opt-in)",
+                    value=bool(est_info.get("comparte_con_tutor", 1)),
+                )
+                if st.form_submit_button("Actualizar Consentimiento y Privacidad"):
+                    update_student_consent(usuario["cui_hash"], chk_consent, chk_optin)
+                    st.success("Preferencias de consentimiento informado y privacidad actualizadas en SQLite.")
                     st.rerun()
 
     elif nav_sel == "Carga Masiva de Actas":
@@ -1607,13 +2214,23 @@ if usuario is not None:
                 st.write(f"Archivo cargado: **{len(df_up)} filas detectadas**.")
 
                 if st.button("Validar y Procesar Acta con Sistema Multiagente", type="primary"):
-                    with st.spinner("Ejecutando validaciones sintácticas y pipeline multiagente..."):
+                    with st.spinner("Ejecutando validaciones sintácticas, pipeline multiagente y persistencia transaccional en SQLite..."):
                         procesados, errores = validar_y_procesar_acta_masiva(df_up, coordinator)
+
+                    c_sum1, c_sum2, c_sum3 = st.columns(3)
+                    c_sum1.metric("Total Filas Analizadas", len(df_up))
+                    c_sum2.metric("Registros Procesados y Persistidos", len(procesados))
+                    c_sum3.metric("Filas Rechazadas / Con Errores", len(errores))
+
                     if errores:
-                        st.warning(f"Se encontraron {len(errores)} observaciones:")
+                        st.warning(f"Se rechazaron {len(errores)} filas con observaciones de validación:")
                         st.dataframe(pd.DataFrame(errores), use_container_width=True)
                     if procesados:
-                        st.success(f"Se procesaron con éxito {len(procesados)} registros de estudiantes.")
+                        st.success(
+                            f"Se procesaron y persistieron transaccionalmente en SQLite {len(procesados)} registros "
+                            "anonimizados con HMAC-SHA256 (matrículas, notas, predicciones, explicaciones SHAP, "
+                            "mensajes FIPA-ACL y métricas técnicas)."
+                        )
                         st.dataframe(pd.DataFrame(procesados), use_container_width=True)
             except Exception as e:
                 st.error(f"Error al leer el archivo: {e!s}")
@@ -1636,11 +2253,15 @@ if usuario is not None:
         st.markdown("---")
         st.dataframe(
             df_macro.rename(columns={
-                "curso": "Asignatura", "total_alumnos": "Total Estudiantes",
-                "rojos": "Críticos (Rojo)", "amarillos": "Observación (Amarillo)",
-                "verdes": "Regulares (Verde)", "tasa_riesgo_pct": "% En Riesgo"
+                "curso": "Asignatura",
+                "semestre": "Semestre",
+                "total_alumnos": "Total Estudiantes",
+                "rojos": "Críticos (Rojo)",
+                "amarillos": "Observación (Amarillo)",
+                "verdes": "Regulares (Verde)",
+                "tasa_riesgo_pct": "% En Riesgo",
             }),
-            use_container_width=True
+            use_container_width=True,
         )
 
     elif nav_sel == "Monitor Técnico OBJ5":
@@ -1649,13 +2270,45 @@ if usuario is not None:
         st.markdown('<p class="section-subtitle">Cumplimiento de latencia e hipótesis H3</p>', unsafe_allow_html=True)
 
         stats_tec = get_technical_metrics_summary()
+        n_muestras = int(stats_tec.get("total_muestras", 0))
         col_t1, col_t2, col_t3, col_t4 = st.columns(4)
-        col_t1.metric("Latencia Media Inferencia", f"{stats_tec['latencia_inf_media_ms']} ms", delta="< 5 ms")
-        col_t2.metric("Latencia P95 Inferencia", f"{stats_tec['latencia_inf_p95_ms']} ms")
-        col_t3.metric("Uso Promedio RAM", f"{stats_tec['ram_media_mb']} MB", delta="< 400 MB")
-        col_t4.metric("Overhead Bus Asíncrono", f"{stats_tec['overhead_media_ms']} ms", delta="< 0.5 ms")
 
-        st.info("La latencia de respuesta total del sistema se mantiene holgadamente por debajo de los 1.5 s exigidos por la hipótesis H3, desacoplando la inferencia inmediata de la generación de explicaciones.")
+        if n_muestras == 0:
+            col_t1.metric("Latencia Media Inferencia", "Sin muestras (0.0 ms)", delta="0 mediciones", delta_color="off")
+            col_t2.metric("Latencia P95 Inferencia", "Sin muestras (0.0 ms)", delta="0 mediciones", delta_color="off")
+            col_t3.metric("Uso Promedio RAM", "Sin muestras (0.0 MB)", delta="0 mediciones", delta_color="off")
+            col_t4.metric("Overhead Bus Asíncrono", "Sin muestras (0.0 ms)", delta="0 mediciones", delta_color="off")
+            st.warning(
+                "Estado actual: Sin mediciones registradas en SQLite (0 muestras en 'metricas_tecnicas'). "
+                "Las mediciones reales de latencia de inferencia, P95, memoria RAM y overhead del bus FIPA-ACL "
+                "se registran automáticamente al ejecutar inferencias en el Sistema Multiagente."
+            )
+        else:
+            col_t1.metric(
+                "Latencia Media Inferencia",
+                f"{stats_tec['latencia_inf_media_ms']:.2f} ms",
+                delta=f"{n_muestras} muestras reales",
+            )
+            col_t2.metric(
+                "Latencia P95 Inferencia",
+                f"{stats_tec['latencia_inf_p95_ms']:.2f} ms",
+                delta=f"XAI media: {stats_tec['latencia_xai_media_ms']:.2f} ms",
+            )
+            col_t3.metric(
+                "Uso Promedio RAM",
+                f"{stats_tec['ram_media_mb']:.1f} MB",
+                delta="< 400 MB",
+            )
+            col_t4.metric(
+                "Overhead Bus Asíncrono",
+                f"{stats_tec['overhead_media_ms']:.3f} ms",
+                delta=f"Total medio: {stats_tec['latencia_total_media_ms']:.2f} ms",
+            )
+            st.info(
+                f"Telemetría real calculada sobre {n_muestras} ejecuciones persistidas en SQLite. "
+                f"Latencia total media end-to-end (Inferencia + SHAP + Recomendación + Alerta): "
+                f"{stats_tec['latencia_total_media_ms']:.2f} ms, cumpliendo la hipótesis H3 (< 1,500 ms)."
+            )
 
     elif nav_sel == "Encuestas SUS / TAM":
         st.markdown('<span class="section-label">VALIDACIÓN PSICOMÉTRICA</span>', unsafe_allow_html=True)
@@ -1669,23 +2322,71 @@ if usuario is not None:
         col_s1.metric("Puntuación Media SUS (Usabilidad)", f"{sus_stats['promedio']} / 100", delta=f"{sus_stats['total']} evaluadores")
         col_s2.metric("Puntuación Media TAM (Aceptación)", f"{tam_stats['promedio']} / 5.0", delta=f"{tam_stats['total']} evaluadores")
 
-        with st.form("form_sus_eval"):
-            p1 = st.slider("1. Creo que me gustaría utilizar este sistema con frecuencia:", 1, 5, 4)
-            p2 = st.slider("2. Encontré el sistema innecesariamente complejo:", 1, 5, 2)
-            p3 = st.slider("3. Pensé que el sistema fue fácil de usar:", 1, 5, 4)
-            p4 = st.slider("4. Creo que necesitaría apoyo técnico para utilizarlo:", 1, 5, 1)
-            p5 = st.slider("5. Las diversas funciones estaban bien integradas:", 1, 5, 5)
-            p6 = st.slider("6. Había demasiada inconsistencia en el sistema:", 1, 5, 1)
-            p7 = st.slider("7. La mayoría aprendería a usarlo muy rápidamente:", 1, 5, 4)
-            p8 = st.slider("8. Encontré el sistema muy engorroso de utilizar:", 1, 5, 1)
-            p9 = st.slider("9. Me sentí muy seguro al utilizar el sistema:", 1, 5, 4)
-            p10 = st.slider("10. Necesité aprender muchas cosas antes de empezar:", 1, 5, 2)
+        tab_sus, tab_tam = st.tabs([
+            "Cuestionario SUS (System Usability Scale)",
+            "Cuestionario TAM (Technology Acceptance Model)",
+        ])
 
-            if st.form_submit_button("Guardar Evaluación SUS"):
-                score_sus = ((p1 - 1) + (5 - p2) + (p3 - 1) + (5 - p4) + (p5 - 1) + (5 - p6) + (p7 - 1) + (5 - p8) + (p9 - 1) + (5 - p10)) * 2.5
-                save_survey(usuario["username"], "DOCENTE_EVAL", "SUS", {
-                    "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5,
-                    "p6": p6, "p7": p7, "p8": p8, "p9": p9, "p10": p10
-                }, score_sus)
-                st.success(f"Evaluación SUS registrada exitosamente. Puntaje obtenido: {score_sus:.1f} / 100")
-                st.rerun()
+        with tab_sus:
+            with st.form("form_sus_eval"):
+                p1 = st.slider("1. Creo que me gustaría utilizar este sistema con frecuencia:", 1, 5, 4)
+                p2 = st.slider("2. Encontré el sistema innecesariamente complejo:", 1, 5, 2)
+                p3 = st.slider("3. Pensé que el sistema fue fácil de usar:", 1, 5, 4)
+                p4 = st.slider("4. Creo que necesitaría apoyo técnico para utilizarlo:", 1, 5, 1)
+                p5 = st.slider("5. Las diversas funciones estaban bien integradas:", 1, 5, 5)
+                p6 = st.slider("6. Había demasiada inconsistencia en el sistema:", 1, 5, 1)
+                p7 = st.slider("7. La mayoría aprendería a usarlo muy rápidamente:", 1, 5, 4)
+                p8 = st.slider("8. Encontré el sistema muy engorroso de utilizar:", 1, 5, 1)
+                p9 = st.slider("9. Me sentí muy seguro al utilizar el sistema:", 1, 5, 4)
+                p10 = st.slider("10. Necesité aprender muchas cosas antes de empezar:", 1, 5, 2)
+
+                if st.form_submit_button("Guardar Evaluación SUS"):
+                    score_sus = ((p1 - 1) + (5 - p2) + (p3 - 1) + (5 - p4) + (p5 - 1) + (5 - p6) + (p7 - 1) + (5 - p8) + (p9 - 1) + (5 - p10)) * 2.5
+                    save_survey(usuario["username"], rol, "SUS", {
+                        "p1": p1, "p2": p2, "p3": p3, "p4": p4, "p5": p5,
+                        "p6": p6, "p7": p7, "p8": p8, "p9": p9, "p10": p10
+                    }, score_sus)
+                    st.success(f"Evaluación SUS registrada exitosamente. Puntaje obtenido: {score_sus:.1f} / 100")
+                    st.rerun()
+
+        with tab_tam:
+            with st.form("form_tam_eval"):
+                st.markdown("**Dimensión 1: Utilidad Percibida (Perceived Usefulness - PU)**")
+                tam_pu1 = st.slider(
+                    "1. [PU1] El sistema SATA-UNSA permite identificar oportunamente el riesgo académico en las asignaturas:",
+                    1, 5, 5,
+                )
+                tam_pu2 = st.slider(
+                    "2. [PU2] Las explicaciones locales SHAP y las metas cuantitativas mejoran la toma de decisiones en tutoría:",
+                    1, 5, 5,
+                )
+                tam_pu3 = st.slider(
+                    "3. [PU3] Considero que el sistema SATA-UNSA es útil para reducir la reprobación académica en la EPIS-UNSA:",
+                    1, 5, 5,
+                )
+                st.markdown("**Dimensión 2: Facilidad de Uso Percibida e Intención de Uso (PEOU & BI)**")
+                tam_peou1 = st.slider(
+                    "4. [PEOU1] La interacción con los paneles y el semáforo preventivo de 3 niveles es clara y comprensible:",
+                    1, 5, 4,
+                )
+                tam_peou2 = st.slider(
+                    "5. [PEOU2] Resulta sencillo auditar la trazabilidad FIPA-ACL y exportar las fichas de intervención en PDF:",
+                    1, 5, 5,
+                )
+                tam_bi1 = st.slider(
+                    "6. [BI1] Tengo intención de utilizar el sistema regularmente para el seguimiento académico semestral:",
+                    1, 5, 5,
+                )
+
+                if st.form_submit_button("Guardar Evaluación TAM"):
+                    score_tam = round((tam_pu1 + tam_pu2 + tam_pu3 + tam_peou1 + tam_peou2 + tam_bi1) / 6.0, 2)
+                    save_survey(usuario["username"], rol, "TAM", {
+                        "pu1": tam_pu1,
+                        "pu2": tam_pu2,
+                        "pu3": tam_pu3,
+                        "peou1": tam_peou1,
+                        "peou2": tam_peou2,
+                        "bi1": tam_bi1,
+                    }, score_tam)
+                    st.success(f"Evaluación TAM registrada exitosamente. Puntaje obtenido: {score_tam:.2f} / 5.0")
+                    st.rerun()

@@ -17,6 +17,24 @@ from src.agents.coordinator_agent import CoordinatorAgent
 from src.messaging.bus import MessageBus
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_test_database(tmp_path_factory):
+    """
+    Redirige DB_PATH a una base de datos SQLite temporal aislada durante toda la
+    ejecución de pytest para no contaminar la base de datos institucional sata_unsa.db.
+    """
+    import src.database.db as db_mod
+
+    original_db_path = db_mod.DB_PATH
+    temp_dir = tmp_path_factory.mktemp("sata_test_db")
+    test_db_path = os.path.join(str(temp_dir), "sata_unsa_test.db")
+    db_mod.DB_PATH = test_db_path
+    db_mod.init_database()
+    db_mod.seed_initial_data()
+    yield test_db_path
+    db_mod.DB_PATH = original_db_path
+
+
 @pytest.fixture(scope="session")
 def models_dir():
     """Ruta del directorio de modelos serializados."""

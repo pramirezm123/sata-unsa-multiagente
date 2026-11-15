@@ -93,12 +93,14 @@ class XaiAgent(BaseAgent):
 
         factors = []
         for feat_name, val, impact in zip(features_used, df_row.iloc[0], sv):
+            val_clean = 0.0 if pd.isna(val) else round(float(val), 2)
+            imp_clean = 0.0 if pd.isna(impact) else round(float(impact), 4)
             factors.append({
                 "feature": feat_name,
                 "label": FEATURE_TRANSLATIONS.get(feat_name, feat_name),
-                "value": round(float(val), 2),
-                "impact": round(float(impact), 4),
-                "direction": "Riesgo" if impact > 0 else "Protección"
+                "value": val_clean,
+                "impact": imp_clean,
+                "direction": "Riesgo" if imp_clean > 0 else "Protección"
             })
 
         # Ordenar por magnitud de impacto
@@ -110,3 +112,90 @@ class XaiAgent(BaseAgent):
             "top_factors": top_factors,
             "all_factors": factors
         }
+
+
+def format_shap_factor_for_ui(factor: dict[str, Any] | None, max_abs_impact: float = 1.0) -> dict[str, Any]:
+    """
+    Normaliza y formatea un factor explicativo SHAP para su representación visual.
+    Utiliza estrictamente la contribución SHAP ('impact') para signo, color y magnitud,
+    separando el valor observado de la variable ('value').
+    Maneja estructuras incompletas o valores nulos sin lanzar excepciones.
+    """
+    if not isinstance(factor, dict):
+        return {
+            "label": "Factor evaluado",
+            "impact": 0.0,
+            "impact_text": "+0.00",
+            "observed_value": None,
+            "direction": "Riesgo",
+            "is_risk": True,
+            "color_css": "var(--granate)",
+            "width_pct": 0,
+        }
+
+    label = str(factor.get("label") or factor.get("feature") or "Factor evaluado")
+    raw_impact = factor.get("impact")
+    raw_value = factor.get("value")
+
+    observed_str: str | None = None
+    if raw_impact is not None and not (isinstance(raw_impact, float) and pd.isna(raw_impact)):
+        try:
+            impact_val = float(raw_impact)
+            if pd.isna(impact_val):
+                impact_val = 0.0
+        except (ValueError, TypeError):
+            impact_val = 0.0
+
+        if raw_value is not None and not (isinstance(raw_value, float) and pd.isna(raw_value)):
+            try:
+                if isinstance(raw_value, int):
+                    observed_str = str(raw_value)
+                else:
+                    val_f = float(raw_value)
+                    if not pd.isna(val_f):
+                        observed_str = str(int(val_f)) if val_f.is_integer() and isinstance(raw_value, int) else f"{val_f:g}" if val_f.is_integer() else f"{val_f:.1f}"
+            except (ValueError, TypeError):
+                observed_str = str(raw_value)
+    else:
+        # Compatibilidad con estructuras heredadas donde solo existía 'value' como impacto
+        try:
+            impact_val = float(raw_value) if raw_value is not None else 0.0
+            if pd.isna(impact_val):
+                impact_val = 0.0
+        except (ValueError, TypeError):
+            impact_val = 0.0
+
+    if impact_val > 0:
+        is_risk = True
+    elif impact_val < 0:
+        is_risk = False
+    else:
+        dir_raw = str(factor.get("direction") or "").strip().lower()
+        is_risk = dir_raw not in ("protección", "proteccion", "protector")
+
+    direction = "Riesgo" if is_risk else "Protección"
+    color_css = "var(--granate)" if is_risk else "var(--azul-factor)"
+
+    if 0.0 < abs(impact_val) < 0.005:
+        impact_text = f"{impact_val:+.4f}"
+    elif impact_val != 0.0:
+        impact_text = f"{impact_val:+.2f}"
+    else:
+        impact_text = "+0.00" if is_risk else "-0.00"
+
+    denom = max_abs_impact if (max_abs_impact and max_abs_impact > 0.0) else (abs(impact_val) if abs(impact_val) > 0.0 else 1.0)
+    if abs(impact_val) == 0.0:
+        width_pct = 0
+    else:
+        width_pct = max(4, min(100, int(round((abs(impact_val) / denom) * 100))))
+
+    return {
+        "label": label,
+        "impact": impact_val,
+        "impact_text": impact_text,
+        "observed_value": observed_str,
+        "direction": direction,
+        "is_risk": is_risk,
+        "color_css": color_css,
+        "width_pct": width_pct,
+    }

@@ -42,6 +42,28 @@ class MessageBus:
         except queue.Empty:
             return None
 
+    @staticmethod
+    def _extract_topic(m: AgentMessage) -> str:
+        """Determina el tópico semántico del mensaje FIPA-ACL sin exponer datos sensibles."""
+        if isinstance(m.content, dict):
+            if "action" in m.content:
+                return str(m.content["action"])
+            if "errors" in m.content:
+                return "VALIDATION_FAILURE"
+            if "probability" in m.content:
+                return f"PREDICT_{m.content.get('checkpoint', 'CP')}"
+            if "top_factors" in m.content:
+                return f"SHAP_{m.content.get('checkpoint', 'CP')}"
+            if "actions" in m.content:
+                return f"PROPOSE_TUTORIA_{m.content.get('checkpoint', 'CP')}"
+            if "risk_level" in m.content:
+                return f"ALERT_{m.content.get('risk_level', 'INFO')}"
+            if "features" in m.content:
+                return f"FEATURES_{m.content.get('checkpoint', 'CP')}"
+            if "status" in m.content:
+                return f"INGEST_{m.content.get('status')}"
+        return m.performative
+
     def get_history_summary(self, conversation_id: str | None = None) -> list[dict]:
         """Retorna el historial de mensajes formateado para auditoría y visualización, con filtro O(1) por conversación."""
         if conversation_id is not None:
@@ -51,9 +73,12 @@ class MessageBus:
         return [
             {
                 "time": time.strftime("%H:%M:%S", time.localtime(m.timestamp)),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(m.timestamp)),
                 "sender": m.sender,
                 "receiver": m.receiver,
                 "performative": m.performative,
+                "action": self._extract_topic(m),
+                "topic": self._extract_topic(m),
                 "conversation_id": m.conversation_id,
                 "summary": str(m.content)[:100] + "..." if len(str(m.content)) > 100 else str(m.content)
             }

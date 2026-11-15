@@ -6,6 +6,7 @@ Pruebas exhaustivas de los servicios de soporte:
 import pandas as pd
 
 from src.reports.pdf_generator import generate_intervention_pdf
+from src.security.crypto import hash_cui
 from src.services.academic_service import (
     generar_plantilla_carga_masiva_csv,
     validar_y_procesar_acta_masiva,
@@ -54,7 +55,7 @@ class TestCsvBatchProcessing:
         proc, err = validar_y_procesar_acta_masiva(df, coordinator)
         assert len(proc) == 1, "Solo la fila válida debe procesarse."
         assert len(err) == 3, "Las 3 filas con error deben ser reportadas fila por fila."
-        assert proc[0]["id_estudiante"] == "EST_OK"
+        assert proc[0]["id_estudiante"] == hash_cui("EST_OK")
 
     def test_template_generation_contains_required_headers(self):
         template = generar_plantilla_carga_masiva_csv()
