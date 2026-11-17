@@ -35,6 +35,7 @@ from src.database.db import (
     get_course_risk_summary,
     get_course_sections_summary,
     get_course_students_table,
+    get_courses_for_user,
     get_enrollment_by_id,
     get_grade_change_history,
     get_grades_for_enrollment,
@@ -1299,7 +1300,8 @@ if usuario is not None:
 
     # Sub-cabecera con saludo, 3 métricas reales desde SQLite con borde dorado y lema (Mockup 2)
     catalogo = get_all_courses()
-    cursos_nombres_all = [c["nombre"] for c in catalogo]
+    cursos_rol = get_courses_for_user(usuario, "2026-B") if rol == "DOCENTE" else catalogo
+    cursos_nombres_all = [c["nombre"] for c in (cursos_rol or catalogo)]
 
     def _get_default_course_index(cursos_list: list[str]) -> int:
         pref = st.session_state.get("docente_curso_activo")
@@ -2147,7 +2149,8 @@ if usuario is not None:
             else:
                 if st.button("Confirmar Inscripción de Asignatura", type="primary"):
                     pesos_dict = {"EC1": w_ec1, "EP1": w_ep1, "EC2": w_ec2, "EP2": w_ep2, "EC3": w_ec3, "EP3": w_ep3}
-                    enroll_course(usuario["cui_hash"], "2026-B", c_sel, d_sel, sec_sel, pesos_dict, es_rep, current_user=usuario)
+                    mat_new_id = enroll_course(usuario["cui_hash"], "2026-B", c_sel, d_sel, sec_sel, pesos_dict, es_rep, current_user=usuario)
+                    evaluate_and_persist_enrollment(mat_new_id, coordinator, current_user=usuario)
                     st.success("Asignatura registrada y monitoreo activado.")
                     st.rerun()
 
@@ -2215,7 +2218,7 @@ if usuario is not None:
 
                 if st.button("Validar y Procesar Acta con Sistema Multiagente", type="primary"):
                     with st.spinner("Ejecutando validaciones sintácticas, pipeline multiagente y persistencia transaccional en SQLite..."):
-                        procesados, errores = validar_y_procesar_acta_masiva(df_up, coordinator)
+                        procesados, errores = validar_y_procesar_acta_masiva(df_up, coordinator, current_user=usuario)
 
                     c_sum1, c_sum2, c_sum3 = st.columns(3)
                     c_sum1.metric("Total Filas Analizadas", len(df_up))

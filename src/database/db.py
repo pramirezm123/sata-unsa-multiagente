@@ -13,12 +13,16 @@ from typing import Any
 
 from ..security.access_control import (
     AuthorizationError,
+    get_authorized_teacher_names,
+    validate_course_teacher_access,
     validate_matricula_ownership,
     validate_student_access,
 )
 from ..security.crypto import ensure_cui_hash, hash_cui, hash_password, verify_password
 
-DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), "sata_unsa.db")
+DB_PATH = os.environ.get("SATA_DB_PATH") or os.path.join(
+    os.path.abspath(os.path.dirname(__file__)), "sata_unsa.db"
+)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -244,13 +248,31 @@ def init_database():
     );
     """)
 
+    # Índices únicos de clave de negocio cuando la tabla no contiene duplicados históricos previos
+    dup_perf = cursor.execute(
+        "SELECT 1 FROM perfil_semestre GROUP BY cui_hash, semestre HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if not dup_perf:
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_perfil_cui_semestre ON perfil_semestre (cui_hash, semestre);"
+        )
+
+    dup_exp = cursor.execute(
+        "SELECT 1 FROM explicaciones GROUP BY prediccion_id HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if not dup_exp:
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_explicaciones_prediccion ON explicaciones (prediccion_id);"
+        )
+
     conn.commit()
     conn.close()
 
 
 def seed_initial_data():
-    """Siembra los catálogos oficiales y usuarios demo para pruebas técnicas."""
+    """Siembra los catálogos oficiales y usuarios demo de forma estrictamente idempotente."""
     conn = get_connection()
+    changes_before = conn.total_changes
     cursor = conn.cursor()
 
     # 1. Catálogo de Cursos Emblemáticos de la EPIS-UNSA
@@ -308,12 +330,17 @@ def seed_initial_data():
         VALUES (?, 1, 1, ?)
         """, (c_hash, now_str))
 
-    # Perfil basal demo
-    cursor.execute("""
-    INSERT OR IGNORE INTO perfil_semestre 
-    (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
-    VALUES (?, '2026-B', 11.5, 1, 6, 4.0, 'DECLARADO', ?)
-    """, (cui_demo_1, now_str))
+    # Perfil basal demo (idempotente por clave de negocio cui_hash + semestre, sin forzar id=1)
+    existing_perf = cursor.execute(
+        "SELECT id FROM perfil_semestre WHERE cui_hash = ? AND semestre = ? LIMIT 1",
+        (cui_demo_1, "2026-B"),
+    ).fetchone()
+    if not existing_perf:
+        cursor.execute("""
+        INSERT INTO perfil_semestre
+        (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
+        VALUES (?, '2026-B', 11.5, 1, 6, 4.0, 'DECLARADO', ?)
+        """, (cui_demo_1, now_str))
 
     # Matrícula demo
     cursor.execute("""
@@ -345,10 +372,16 @@ def seed_initial_data():
         "Coordinar sesión de tutoría individualizada y reforzar conceptos de árboles y grafos.",
         "Monitorear la entrega de prácticas calificadas en Evaluación Continua 2."
     ])
-    cursor.execute("""
-    INSERT OR IGNORE INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
-    VALUES (1, ?, ?, 0.96, ?)
-    """, (top_factors_demo, recs_demo, now_str))
+    # Explicación demo idempotente por clave de negocio prediccion_id=1 y sin fidelidad_r ficticia (None)
+    existing_exp = cursor.execute(
+        "SELECT id FROM explicaciones WHERE prediccion_id = ? LIMIT 1",
+        (1,),
+    ).fetchone()
+    if not existing_exp:
+        cursor.execute("""
+        INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
+        VALUES (1, ?, ?, ?, ?)
+        """, (top_factors_demo, recs_demo, None, now_str))
 
     # Sembrar traza FIPA-ACL real inicial para la evaluación demo (sin datos ficticios ni PII)
     req_demo_id = f"eval_{cui_demo_1}_cp1"
@@ -395,7 +428,8 @@ def seed_initial_data():
         VALUES (1, ?, 'ESTRUCTURAS DE DATOS Y ALGORITMOS', 'DOCENTE PRINCIPAL 1', 'DOCENTE', 'PROGRAMADA', ?, 'Sesión diagnóstica inicial agendada tras alerta temprana en CP1.', 1, 0, 0, ?)
         """, (cui_demo_1, now_str[:10], now_str))
 
-    conn.commit()
+    if conn.total_changes > changes_before:
+        conn.commit()
     conn.close()
 
 
@@ -500,16 +534,29 @@ def get_student_profile(cui_hash: str, semestre: str = "2026-B", current_user: d
 
 def save_student_profile(cui_hash: str, semestre: str, ira: float, repeticiones: int, 
                          creditos: int, semestre_ingreso: float, current_user: dict[str, Any] | None = None) -> bool:
-    """Guarda o actualiza el perfil basal del estudiante con control de acceso."""
+    """Guarda o actualiza el perfil basal del estudiante (idempotente por cui_hash + semestre) con control de acceso."""
     if current_user:
         validate_student_access(current_user, cui_hash)
     conn = get_connection()
     now_str = datetime.now().isoformat()
-    conn.execute("""
-    INSERT INTO perfil_semestre 
-    (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
-    VALUES (?, ?, ?, ?, ?, ?, 'DECLARADO', ?)
-    """, (cui_hash, semestre, ira, repeticiones, creditos, semestre_ingreso, now_str))
+    cur = conn.cursor()
+    existing = cur.execute(
+        "SELECT id FROM perfil_semestre WHERE cui_hash = ? AND semestre = ? ORDER BY id DESC LIMIT 1",
+        (cui_hash, semestre),
+    ).fetchone()
+    if existing:
+        cur.execute("""
+        UPDATE perfil_semestre
+        SET ira_acum = ?, repeticiones_previas = ?, creditos_matriculados = ?,
+            semestre_ingreso = ?, origen = 'DECLARADO', fecha_actualizacion = ?
+        WHERE id = ?
+        """, (ira, repeticiones, creditos, semestre_ingreso, now_str, int(existing["id"])))
+    else:
+        cur.execute("""
+        INSERT INTO perfil_semestre
+        (cui_hash, semestre, ira_acum, repeticiones_previas, creditos_matriculados, semestre_ingreso, origen, fecha_actualizacion)
+        VALUES (?, ?, ?, ?, ?, ?, 'DECLARADO', ?)
+        """, (cui_hash, semestre, ira, repeticiones, creditos, semestre_ingreso, now_str))
     conn.commit()
     conn.close()
     return True
@@ -656,6 +703,9 @@ def save_prediction_result(matricula_id: int, checkpoint: str, proba: float,
                            promedio: float, imposible: bool, top_factors: list, 
                            recs: list, fidelidad: float | None = None) -> int:
     """Guarda o actualiza la predicción y las explicaciones XAI asociadas para un checkpoint."""
+    from ..agents.xai_agent import normalize_local_fidelity
+
+    fidelidad_clean = normalize_local_fidelity(fidelidad)
     conn = get_connection()
     now_str = datetime.now().isoformat()
     cursor = conn.cursor()
@@ -683,12 +733,12 @@ def save_prediction_result(matricula_id: int, checkpoint: str, proba: float,
             UPDATE explicaciones
             SET top_factors_json = ?, recomendaciones_json = ?, fidelidad_r = ?, fecha = ?
             WHERE prediccion_id = ?
-            """, (json.dumps(top_factors), json.dumps(recs), fidelidad, now_str, pred_id))
+            """, (json.dumps(top_factors), json.dumps(recs), fidelidad_clean, now_str, pred_id))
         else:
             cursor.execute("""
             INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
             VALUES (?, ?, ?, ?, ?)
-            """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad, now_str))
+            """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad_clean, now_str))
     else:
         cursor.execute("""
         INSERT INTO predicciones 
@@ -701,7 +751,7 @@ def save_prediction_result(matricula_id: int, checkpoint: str, proba: float,
         cursor.execute("""
         INSERT INTO explicaciones (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
         VALUES (?, ?, ?, ?, ?)
-        """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad, now_str))
+        """, (pred_id, json.dumps(top_factors), json.dumps(recs), fidelidad_clean, now_str))
 
     conn.commit()
     conn.close()
@@ -752,6 +802,8 @@ def persist_acta_row_transactional(
     imposible = bool(al.get("imposible_ordinario", False))
     top_factors = al.get("top_factors") or xai.get("top_factors") or []
     recs = al.get("recommendations") or []
+    from ..agents.xai_agent import normalize_local_fidelity
+    fidelidad_val = normalize_local_fidelity(xai.get("fidelidad_r"))
 
     curso_slug = "".join(ch if ch.isalnum() else "_" for ch in curso)[:16]
     req_id = f"acta_{cui_hash}_{curso_slug}_{checkpoint}"
@@ -899,13 +951,13 @@ def persist_acta_row_transactional(
                 UPDATE explicaciones
                 SET top_factors_json = ?, recomendaciones_json = ?, fidelidad_r = ?, fecha = ?
                 WHERE prediccion_id = ?
-                """, (json.dumps(top_factors), json.dumps(recs), 0.96, now_str, prediccion_id))
+                """, (json.dumps(top_factors), json.dumps(recs), fidelidad_val, now_str, prediccion_id))
             else:
                 cursor.execute("""
                 INSERT INTO explicaciones
                 (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
-                VALUES (?, ?, ?, 0.96, ?)
-                """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), now_str))
+                VALUES (?, ?, ?, ?, ?)
+                """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), fidelidad_val, now_str))
         else:
             cursor.execute("""
             INSERT INTO predicciones
@@ -919,8 +971,8 @@ def persist_acta_row_transactional(
             cursor.execute("""
             INSERT INTO explicaciones
             (prediccion_id, top_factors_json, recomendaciones_json, fidelidad_r, fecha)
-            VALUES (?, ?, ?, 0.96, ?)
-            """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), now_str))
+            VALUES (?, ?, ?, ?, ?)
+            """, (prediccion_id, json.dumps(top_factors), json.dumps(recs), fidelidad_val, now_str))
 
         # 7. Persistir trazas FIPA-ACL del bus para esta solicitud (sin duplicar al reimportar)
         cursor.execute("DELETE FROM mensajes_bus WHERE request_id = ?", (req_id,))
@@ -1089,12 +1141,14 @@ def get_course_sections_summary(curso: str, semestre: str = "2026-B") -> list[di
 
 def get_course_students_table(curso: str, semestre: str = "2026-B", current_user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """
-    Retorna la lista de estudiantes exclusivamente para el docente/tutor.
+    Retorna la lista de estudiantes exclusivamente para el docente/tutor titular del curso.
     Si el estudiante NO dio consentimiento (opt-in comparte_con_tutor=0),
     sus datos individuales se anonimizan como 'RES-XXXXXX'.
-    Aplica aislamiento estricto: ESTUDIANTE, ADMIN y AUTORIDAD no tienen acceso a registros individuales.
+    Aplica aislamiento estricto:
+    - ESTUDIANTE, ADMIN y AUTORIDAD no tienen acceso a registros individuales.
+    - DOCENTE requiere asignaciones activas y solo puede consultar sus propios cursos y secciones.
     """
-    if current_user:
+    if current_user is not None:
         rol_u = current_user.get("role")
         if rol_u == "ESTUDIANTE":
             raise AuthorizationError("Aislamiento estricto: Un estudiante no tiene autorización para listar otros alumnos del curso.")
@@ -1104,24 +1158,34 @@ def get_course_students_table(curso: str, semestre: str = "2026-B", current_user
             raise AuthorizationError("Principio de Privacidad: El rol Autoridad solo tiene acceso a métricas agregadas, no a registros individuales de estudiantes.")
 
     conn = get_connection()
-    rows = conn.execute("""
-    SELECT m.id as matricula_id, m.cui_hash, m.seccion, e.comparte_con_tutor,
-           p.checkpoint, p.probabilidad, p.umbral, p.semaforo, p.meta_nota_min,
-           p.promedio_acumulado, p.imposible_ordinario, p.fecha
-    FROM matriculas m
-    JOIN (
-        SELECT matricula_id, MAX(id) as max_id
-        FROM predicciones GROUP BY matricula_id
-    ) latest ON m.id = latest.matricula_id
-    JOIN predicciones p ON latest.max_id = p.id
-    JOIN estudiantes e ON m.cui_hash = e.cui_hash
-    WHERE m.curso = ? AND m.semestre = ?
-    ORDER BY p.probabilidad DESC
-    """, (curso, semestre)).fetchall()
-    conn.close()
+    try:
+        allowed_teacher_names: set[str] | None = None
+        if current_user is not None:
+            allowed_teacher_names = validate_course_teacher_access(current_user, curso, semestre, conn)
+
+        rows = conn.execute("""
+        SELECT m.id as matricula_id, m.cui_hash, m.seccion, m.docente, e.comparte_con_tutor,
+               p.checkpoint, p.probabilidad, p.umbral, p.semaforo, p.meta_nota_min,
+               p.promedio_acumulado, p.imposible_ordinario, p.fecha
+        FROM matriculas m
+        JOIN (
+            SELECT matricula_id, MAX(id) as max_id
+            FROM predicciones GROUP BY matricula_id
+        ) latest ON m.id = latest.matricula_id
+        JOIN predicciones p ON latest.max_id = p.id
+        JOIN estudiantes e ON m.cui_hash = e.cui_hash
+        WHERE m.curso = ? AND m.semestre = ?
+        ORDER BY p.probabilidad DESC
+        """, (curso, semestre)).fetchall()
+    finally:
+        conn.close()
 
     result = []
     for r in rows:
+        if allowed_teacher_names is not None:
+            doc_row = str(r["docente"] or "").strip().upper()
+            if doc_row not in allowed_teacher_names:
+                continue
         item = dict(r)
         if not bool(r["comparte_con_tutor"]):
             item["id_mostrado"] = f"RES-{r['cui_hash'][:6]}"
@@ -1131,6 +1195,35 @@ def get_course_students_table(curso: str, semestre: str = "2026-B", current_user
             item["estado_optin"] = "Compartido con tutor"
         result.append(item)
     return result
+
+
+def get_courses_for_user(current_user: dict[str, Any] | None, semestre: str = "2026-B") -> list[dict[str, Any]]:
+    """
+    Retorna la lista de asignaturas disponibles según el rol del usuario:
+    - Si es DOCENTE, retorna exclusivamente las asignaturas donde es titular en el semestre.
+    - Para otros roles (AUTORIDAD, ADMIN, ESTUDIANTE), retorna el catálogo completo.
+    """
+    catalogo = get_all_courses()
+    if not current_user or current_user.get("role") != "DOCENTE":
+        return catalogo
+    allowed_names = get_authorized_teacher_names(current_user)
+    if not allowed_names:
+        return []
+    placeholders = ",".join("?" for _ in allowed_names)
+    conn = get_connection()
+    rows = conn.execute(
+        f"SELECT DISTINCT curso FROM matriculas WHERE semestre = ? AND UPPER(TRIM(docente)) IN ({placeholders})",
+        (semestre, *tuple(allowed_names)),
+    ).fetchall()
+    conn.close()
+    assigned_names = {str(r["curso"]).strip().upper() for r in rows}
+    if not assigned_names:
+        return []
+    filtered = [c for c in catalogo if str(c["nombre"]).strip().upper() in assigned_names]
+    for c_name in sorted(assigned_names):
+        if all(str(c["nombre"]).strip().upper() != c_name for c in filtered):
+            filtered.append({"nombre": c_name, "semestre_malla": 5})
+    return filtered
 
 
 def get_bus_messages_for_student(cui_hash: str, limit: int = 8) -> list[dict[str, Any]]:
@@ -1530,6 +1623,8 @@ def evaluate_and_persist_enrollment(
     else:
         semaforo = "VERDE"
 
+    from ..agents.xai_agent import normalize_local_fidelity
+
     save_prediction_result(
         matricula_id=matricula_id,
         checkpoint=checkpoint,
@@ -1541,7 +1636,7 @@ def evaluate_and_persist_enrollment(
         imposible=imposible,
         top_factors=al.get("top_factors") or xai.get("top_factors") or [],
         recs=al.get("recommendations") or [],
-        fidelidad=0.96,
+        fidelidad=normalize_local_fidelity(xai.get("fidelidad_r")),
     )
     return res_sma
 

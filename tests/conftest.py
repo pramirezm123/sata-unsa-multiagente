@@ -4,6 +4,7 @@ Garantiza aislamiento de base de datos, inicialización de bus y fixtures reutil
 """
 import os
 import sys
+import tempfile
 
 import pandas as pd
 import pytest
@@ -12,6 +13,11 @@ import pytest
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+
+# Redirigir SATA_DB_PATH antes de importar src.database.db para que la importación
+# inicial jamás escriba sobre la base de datos institucional sata_unsa.db
+_BOOT_TEST_DIR = tempfile.mkdtemp(prefix="sata_boot_test_")
+os.environ.setdefault("SATA_DB_PATH", os.path.join(_BOOT_TEST_DIR, "sata_boot.db"))
 
 from src.agents.coordinator_agent import CoordinatorAgent
 from src.messaging.bus import MessageBus

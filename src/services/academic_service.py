@@ -13,7 +13,11 @@ import numpy as np
 import pandas as pd
 
 from ..database.db import persist_acta_row_transactional
+from ..security.access_control import AuthorizationError, get_authorized_teacher_names
 from ..security.crypto import ensure_cui_hash
+
+# Regla académica obligatoria UNSA: promedio redondeado >= 10.50 equivale a nota aprobatoria 11
+UMBRAL_APROBACION_NORMATIVO: float = 10.50
 
 
 def calcular_semaforo(probabilidad: float, checkpoint: str, imposible_ordinario: bool = False) -> dict[str, Any]:
@@ -122,8 +126,8 @@ def calcular_simulacion_sustitutorio(
     # Despejar nota en examen sustitutorio S tal que:
     # Prom_nuevo = Prom_ordinario - (peor_nota * peor_peso) + (S * peor_peso) >= 10.5
     # S = peor_nota + (10.5 - prom_ordinario) / peor_peso
-    delta_necesario = 10.5 - prom_ordinario
-    s_min_exacta = peor_nota + (delta_necesario / peor_peso)
+    delta_necesario = UMBRAL_APROBACION_NORMATIVO - prom_ordinario
+    s_min_exacta = round(peor_nota + (delta_necesario / peor_peso), 6)
     s_min_redondeada = math.ceil(s_min_exacta)
 
     es_posible = (s_min_redondeada <= 20)
@@ -145,6 +149,98 @@ def calcular_simulacion_sustitutorio(
             f"Matemáticamente inalcanzable: aún obteniendo 20 en el sustitutorio en reemplazo de {peor_nombre}, "
             f"su promedio máximo sería de {(prom_ordinario - peor_nota*peor_peso + 20*peor_peso):.2f}."
         )
+    }
+
+
+def evaluar_condicion_academica_normativa(
+    ec1: float | None = None,
+    ep1: float | None = None,
+    ec2: float | None = None,
+    ep2: float | None = None,
+    ec3: float | None = None,
+    ep3: float | None = None,
+    pesos: dict[str, int] | None = None,
+    probabilidad_riesgo: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Evalúa de forma coherente y unificada la condición académica bajo la normativa UNSA:
+    - Umbral único de aprobación por redondeo: promedio >= 10.50 (nota entera 11).
+    - Nota redondeada de 10.49 reprueba (nota entera 10).
+    - Calcula puntos acumulados, peso evaluado, peso pendiente, puntos faltantes para 10.50,
+      nota mínima necesaria en evaluaciones pendientes e imposibilidad matemática ordinaria.
+    - En CP3 (cuando se rindieron las 3 fases), integra la simulación del examen sustitutorio
+      reemplazando exclusivamente min(EP1, EP2, EP3) y jamás una evaluación continua (EC).
+    - Si matemáticamente no es posible aprobar en vía ordinaria, activa la alerta roja.
+    """
+    pesos_cfg = pesos or {"EC1": 15, "EP1": 15, "EC2": 20, "EP2": 20, "EC3": 15, "EP3": 15}
+    sum_w = float(sum(pesos_cfg.get(k, 0) for k in ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"])) or 100.0
+    w_norm = {k: (float(pesos_cfg.get(k, 0)) / sum_w) * 100.0 for k in ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"]}
+
+    evals_map = {"EC1": ec1, "EP1": ep1, "EC2": ec2, "EP2": ep2, "EC3": ec3, "EP3": ep3}
+    has_f1 = (ec1 is not None) or (ep1 is not None)
+    has_f2 = (ec2 is not None) or (ep2 is not None)
+    has_f3 = (ec3 is not None) or (ep3 is not None)
+
+    if has_f3 and has_f2 and has_f1:
+        checkpoint = "CP3"
+        fases_evaluadas = ["EC1", "EP1", "EC2", "EP2", "EC3", "EP3"]
+    elif has_f2 and has_f1:
+        checkpoint = "CP2"
+        fases_evaluadas = ["EC1", "EP1", "EC2", "EP2"]
+    elif has_f1:
+        checkpoint = "CP1"
+        fases_evaluadas = ["EC1", "EP1"]
+    else:
+        checkpoint = "CP0"
+        fases_evaluadas = []
+
+    puntos_acum_raw = sum(
+        (float(evals_map[k]) if evals_map[k] is not None else 0.0) * (w_norm[k] / 100.0)
+        for k in fases_evaluadas
+    )
+    peso_evaluado = sum(w_norm[k] for k in fases_evaluadas)
+    peso_pendiente = max(0.0, round(100.0 - peso_evaluado, 4))
+
+    promedio_redondeado = round(puntos_acum_raw, 2)
+    nota_entera_acta = int(math.floor(promedio_redondeado + 0.5))
+    aprobado_actual = bool(promedio_redondeado >= UMBRAL_APROBACION_NORMATIVO)
+    puntos_faltantes = 0.0 if aprobado_actual else max(0.0, round(UMBRAL_APROBACION_NORMATIVO - promedio_redondeado, 4))
+
+    if peso_pendiente > 0.0:
+        nota_min_pend = round((puntos_faltantes * 100.0) / peso_pendiente, 2)
+        imposible_ordinario = bool(((puntos_faltantes * 100.0) / peso_pendiente) > 20.0 + 1e-6)
+        posible_ordinario = not imposible_ordinario
+        sim_susti = calcular_simulacion_sustitutorio(ec1, ep1, ec2, ep2, ec3, ep3, pesos_cfg)
+        posible_con_sustitutorio = posible_ordinario
+    else:
+        nota_min_pend = 0.0 if aprobado_actual else None
+        posible_ordinario = aprobado_actual
+        imposible_ordinario = not aprobado_actual
+        sim_susti = calcular_simulacion_sustitutorio(ec1, ep1, ec2, ep2, ec3, ep3, pesos_cfg)
+        posible_con_sustitutorio = True if aprobado_actual else bool(sim_susti.get("es_viable", False))
+
+    semaforo_info = calcular_semaforo(
+        probabilidad=probabilidad_riesgo,
+        checkpoint=checkpoint,
+        imposible_ordinario=imposible_ordinario,
+    )
+
+    return {
+        "checkpoint": checkpoint,
+        "umbral_aprobacion_normativo": UMBRAL_APROBACION_NORMATIVO,
+        "puntos_acumulados": promedio_redondeado,
+        "nota_entera_acta": nota_entera_acta,
+        "aprobado": aprobado_actual,
+        "puntos_faltantes": puntos_faltantes,
+        "peso_evaluado": round(peso_evaluado, 2),
+        "peso_pendiente": round(peso_pendiente, 2),
+        "nota_minima_pendiente": nota_min_pend,
+        "posible_aprobar_ordinario": posible_ordinario,
+        "imposible_aprobar_ordinario": imposible_ordinario,
+        "posible_aprobar_con_sustitutorio": posible_con_sustitutorio,
+        "sustitutorio": sim_susti,
+        "semaforo": semaforo_info["color"],
+        "alerta_roja": bool(semaforo_info["color"] == "ROJO"),
     }
 
 
@@ -174,15 +270,28 @@ def validar_y_procesar_acta_masiva(
     coordinator_agent,
     semestre: str = "2026-B",
     persist: bool = True,
+    current_user: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Valida fila por fila un archivo de carga masiva (.csv / .xlsx).
+    - Si se proporciona current_user, valida rol autorizado (DOCENTE titular de la fila o ADMIN).
     - Filas con errores se agregan al reporte de errores sin interrumpir el lote.
     - Aplica anonimización HMAC-SHA256 (cero CUI en texto claro en BD ni en resultados).
     - Filas válidas se envían al bus del Sistema Multiagente para inferencia y semaforización,
       y se persisten de forma transaccional en SQLite (estudiantes, perfil_semestre, matriculas,
       notas, historial_cambios, predicciones, explicaciones, mensajes_bus y metricas_tecnicas).
     """
+    allowed_teacher_names: set[str] | None = None
+    if current_user is not None:
+        rol_u = current_user.get("role")
+        if rol_u != "DOCENTE":
+            raise AuthorizationError(
+                f"Acceso denegado: El rol '{rol_u}' no tiene privilegios para cargar actas de calificaciones."
+            )
+        allowed_teacher_names = get_authorized_teacher_names(current_user)
+        if not allowed_teacher_names:
+            raise AuthorizationError("Acceso denegado: Docente sin identificador autorizado para carga de actas.")
+
     filas_procesadas: list[dict[str, Any]] = []
     reporte_errores: list[dict[str, Any]] = []
 
@@ -231,6 +340,11 @@ def validar_y_procesar_acta_masiva(
             errores_fila.append("Falta especificar el nombre de la asignatura.")
         if not docente:
             errores_fila.append("Falta especificar el docente responsable.")
+        elif allowed_teacher_names is not None and docente not in allowed_teacher_names:
+            raise AuthorizationError(
+                f"Violación de aislamiento docente en fila {n_fila}: El usuario '{current_user.get('username')}' "
+                f"no tiene autorización para cargar actas del docente '{docente}'."
+            )
 
         # Detección de inyección de fórmulas CSV (=, +, @, |)
         tiene_formula = False

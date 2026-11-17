@@ -31,6 +31,8 @@ scratch/
 .system_generated/
 *.log
 *.db
+*.db-shm
+*.db-wal
 .salt_secret
 .coverage
 .coverage.*

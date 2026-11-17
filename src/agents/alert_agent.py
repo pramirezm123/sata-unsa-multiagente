@@ -43,7 +43,14 @@ class AlertAgent(BaseAgent):
         u = pred.get("threshold", 0.30)
         checkpoint = pred.get("checkpoint", "CP0")
         f = prep.get("features", {})
-        imposible = f.get("IMPOSIBLE_APROBAR_F1", 0) or f.get("IMPOSIBLE_APROBAR_F2", 0)
+        if checkpoint == "CP1" and "IMPOSIBLE_APROBAR_NORM_F1" in f:
+            imposible = f.get("IMPOSIBLE_APROBAR_NORM_F1", 0)
+        elif checkpoint == "CP2" and "IMPOSIBLE_APROBAR_NORM_F2" in f:
+            imposible = f.get("IMPOSIBLE_APROBAR_NORM_F2", 0)
+        elif checkpoint == "CP3" and "IMPOSIBLE_APROBAR_NORM_CP3" in f:
+            imposible = f.get("IMPOSIBLE_APROBAR_NORM_CP3", 0)
+        else:
+            imposible = f.get("IMPOSIBLE_APROBAR_F1", 0) or f.get("IMPOSIBLE_APROBAR_F2", 0)
 
         # Categorización calibrada del Semáforo con Banda Amarilla (0.75 * umbral)
         th_yellow = round(0.75 * u, 4)
@@ -62,6 +69,15 @@ class AlertAgent(BaseAgent):
             color = "#22C55E"
             badge = "Desempeño Seguro (Riesgo Bajo)"
 
+        if checkpoint == "CP1":
+            meta_raw = f.get("NOTA_MIN_NORM_PEND_F1", f.get("NOTA_MIN_PEND_F1", 10.5))
+            meta_nota_min = round(float(meta_raw), 2)
+        elif checkpoint == "CP2":
+            meta_raw = f.get("NOTA_MIN_NORM_PEND_F2", f.get("NOTA_MIN_PEND_F2", 10.5))
+            meta_nota_min = round(float(meta_raw), 2)
+        else:
+            meta_nota_min = None
+
         return {
             "risk_level": level,
             "badge": badge,
@@ -72,10 +88,10 @@ class AlertAgent(BaseAgent):
             "threshold_pct": round(u * 100.0, 2),
             "threshold_yellow": th_yellow,
             "checkpoint": checkpoint,
-            "is_alert": pred.get("is_alert", bool(p >= u or imposible_bool)),
+            "is_alert": bool(pred.get("is_alert", False) or p >= u or imposible_bool),
             "imposible_ordinario": imposible_bool,
             "top_factors": xai.get("top_factors", []),
             "recommendations": rec.get("actions", []),
-            "meta_nota_min": round(f.get("NOTA_MIN_PEND_F1" if checkpoint == "CP1" else "NOTA_MIN_PEND_F2", 11.0), 2) if checkpoint in ["CP1", "CP2"] else None,
+            "meta_nota_min": meta_nota_min,
             "promedio_acumulado": round(f.get("PROM_F1" if checkpoint == "CP1" else ("PROM_F1_F2" if checkpoint == "CP2" else "PROM_TOTAL"), 0.0), 2)
         }

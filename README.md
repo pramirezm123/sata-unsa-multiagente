@@ -104,10 +104,10 @@ La aplicación web se abrirá automáticamente en `http://localhost:8501`.
 ## 👥 Cuentas Demo y Roles del Sistema
 
 Para evaluar los 4 perfiles del sistema en el entorno piloto local:
-- **Estudiante:** CUI `20220638` | Clave: `demo123` (consulta individual, consentimiento, simulador de sustitutorio y plan de tutoría).
-- **Docente / Tutor:** Usuario: `docente_epis` | Clave: `demo123` (panel de sección, semáforo, descarga de actas masivas y reportes PDF).
-- **Autoridad / Comité:** Usuario: `director_epis` | Clave: `demo123` (métricas agregadas por cohorte y curso, sin acceso a datos individuales).
-- **Administrador:** Usuario: `admin_epis` | Clave: `demo123` (gestión de catálogos, ponderaciones, calendario y monitor técnico).
+- **Estudiante:** CUI `20220638` | Clave: `Alumno123*` (consulta individual, consentimiento, simulador de sustitutorio y plan de tutoría).
+- **Docente / Tutor:** Usuario: `docente_demo` | Clave: `Docente123*` (panel de sección, semáforo, descarga de actas masivas y reportes PDF).
+- **Autoridad / Comité:** Usuario: `tutor_epis` | Clave: `Tutor123*` (métricas agregadas por cohorte y curso, sin acceso a datos individuales).
+- **Administrador:** Usuario: `admin` | Clave: `Admin123*` (gestión de catálogos, ponderaciones, calendario y monitor técnico).
 
 ---
 

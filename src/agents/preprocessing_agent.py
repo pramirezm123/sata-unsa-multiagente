@@ -110,6 +110,8 @@ class PreprocessingAgent(BaseAgent):
             checkpoint = "CP0"
 
         # 5. Cálculo intra-semestral de Fase 1
+        # Nota: NOTA_MIN_PEND_F1 e IMPOSIBLE_APROBAR_F1 conservan la formulación de entrenamiento
+        # del modelo .joblib, mientras que *_NORM_* aplica el umbral normativo UNSA (10.50 -> 11).
         f["PESO_F1"] = f["PESO_EC1"] + f["PESO_EP1"]
         f["PUNTOS_F1"] = (f["EC1_VAL"] * f["PESO_EC1"] + f["EP1_VAL"] * f["PESO_EP1"]) / 100.0
         f["PROM_F1"] = (f["PUNTOS_F1"] * 100.0) / (f["PESO_F1"] or 1.0)
@@ -117,6 +119,9 @@ class PreprocessingAgent(BaseAgent):
         f["PUNTOS_FALT_F1"] = max(0.0, 11.0 - f["PUNTOS_F1"])
         f["NOTA_MIN_PEND_F1"] = (f["PUNTOS_FALT_F1"] * 100.0) / (f["PESO_PEND_F1"] or 1.0)
         f["IMPOSIBLE_APROBAR_F1"] = 1 if f["NOTA_MIN_PEND_F1"] > 20.0 else 0
+        f["PUNTOS_FALT_NORM_F1"] = max(0.0, round(10.5 - round(f["PUNTOS_F1"], 2), 4))
+        f["NOTA_MIN_NORM_PEND_F1"] = round((f["PUNTOS_FALT_NORM_F1"] * 100.0) / (f["PESO_PEND_F1"] or 1.0), 4)
+        f["IMPOSIBLE_APROBAR_NORM_F1"] = 1 if f["NOTA_MIN_NORM_PEND_F1"] > 20.0 else 0
         f["FALTANTES_F1"] = f["EC1_SIN_DATO"] + f["EP1_SIN_DATO"]
 
         # 6. Cálculo intra-semestral de Fase 2
@@ -130,6 +135,9 @@ class PreprocessingAgent(BaseAgent):
         f["PUNTOS_FALT_F2"] = max(0.0, 11.0 - f["PUNTOS_F1_F2"])
         f["NOTA_MIN_PEND_F2"] = (f["PUNTOS_FALT_F2"] * 100.0) / f["PESO_PEND_F2"]
         f["IMPOSIBLE_APROBAR_F2"] = 1 if f["NOTA_MIN_PEND_F2"] > 20.0 else 0
+        f["PUNTOS_FALT_NORM_F2"] = max(0.0, round(10.5 - round(f["PUNTOS_F1_F2"], 2), 4))
+        f["NOTA_MIN_NORM_PEND_F2"] = round((f["PUNTOS_FALT_NORM_F2"] * 100.0) / f["PESO_PEND_F2"], 4)
+        f["IMPOSIBLE_APROBAR_NORM_F2"] = 1 if f["NOTA_MIN_NORM_PEND_F2"] > 20.0 else 0
         f["TENDENCIA_F2_VS_F1"] = f["PROM_F2"] - f["PROM_F1"]
         f["FALTANTES_F1_F2"] = f["FALTANTES_F1"] + f["EC2_SIN_DATO"] + f["EP2_SIN_DATO"]
 
@@ -137,8 +145,11 @@ class PreprocessingAgent(BaseAgent):
         f["PESO_F3"] = f["PESO_EC3"] + f["PESO_EP3"]
         f["PUNTOS_F3"] = (f["EC3_VAL"] * f["PESO_EC3"] + f["EP3_VAL"] * f["PESO_EP3"]) / 100.0
         f["PUNTOS_TOTAL"] = f["PUNTOS_F1_F2"] + f["PUNTOS_F3"]
-        f["PROM_TOTAL"] = f["PUNTOS_TOTAL"]
-        f["YA_APROBADO_CP3"] = 1 if f["PUNTOS_TOTAL"] >= 10.5 else 0
+        f["PROM_TOTAL"] = round(f["PUNTOS_TOTAL"], 4)
+        f["PROM_TOTAL_REDONDEADO"] = round(f["PUNTOS_TOTAL"], 2)
+        f["YA_APROBADO_CP3"] = 1 if f["PROM_TOTAL_REDONDEADO"] >= 10.5 else 0
+        f["PUNTOS_FALT_NORM_CP3"] = max(0.0, round(10.5 - f["PROM_TOTAL_REDONDEADO"], 4))
+        f["IMPOSIBLE_APROBAR_NORM_CP3"] = 1 if (checkpoint == "CP3" and f["YA_APROBADO_CP3"] == 0) else 0
         f["TENDENCIA_F3_VS_F2"] = ((f["PUNTOS_F3"] * 100.0) / (f["PESO_F3"] or 1.0)) - f["PROM_F2"]
         f["FALTANTES_TOTAL"] = f["FALTANTES_F1_F2"] + f["EC3_SIN_DATO"] + f["EP3_SIN_DATO"]
 

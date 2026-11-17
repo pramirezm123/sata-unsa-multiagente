@@ -3,6 +3,8 @@ Agente de Explicabilidad (XAI).
 Genera explicaciones locales interpretables mediante SHAP TreeExplainer
 para descomponer las causas de riesgo de cada estudiante individual.
 """
+import json
+import os
 from typing import Any
 
 import pandas as pd
@@ -110,8 +112,57 @@ class XaiAgent(BaseAgent):
         return {
             "checkpoint": checkpoint,
             "top_factors": top_factors,
-            "all_factors": factors
+            "all_factors": factors,
+            "fidelidad_r": None,
         }
+
+
+def normalize_local_fidelity(fidelidad: Any) -> float | None:
+    """
+    Valida y normaliza una métrica de fidelidad local individual (ej. correlación r en [-1, 1]).
+    Dado que XaiAgent emplea shap.TreeExplainer exacto en tiempo real y no ejecuta LIME por
+    instancia, retorna None cuando no se ha calculado una fidelidad local real, evitando
+    persistir constantes ficticias (como 0.96) o mezclar la correlación global offline.
+    """
+    if fidelidad is None or isinstance(fidelidad, bool):
+        return None
+    try:
+        val = float(fidelidad)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(val) or val < -1.0 or val > 1.0:
+        return None
+    return round(val, 4)
+
+
+def get_offline_shap_lime_benchmark(models_dir: str | None = None) -> dict[str, Any]:
+    """
+    Recupera los metadatos del experimento offline de concordancia global SHAP vs. LIME
+    (04_Modelo/fidelidad_shap_lime_cp1.json), diferenciándolo explícitamente de la
+    fidelidad local por estudiante en tiempo real.
+    """
+    base_dir = models_dir or os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "04_Modelo")
+    )
+    json_path = os.path.join(base_dir, "fidelidad_shap_lime_cp1.json")
+    if not os.path.exists(json_path):
+        return {
+            "available": False,
+            "scope": "OFFLINE_GLOBAL_BENCHMARK",
+            "checkpoint": "CP1",
+            "correlacion_pearson": None,
+        }
+    with open(json_path, encoding="utf-8") as f_in:
+        data = json.load(f_in)
+    return {
+        "available": True,
+        "scope": "OFFLINE_GLOBAL_BENCHMARK",
+        "checkpoint": str(data.get("checkpoint", "CP1")),
+        "n_estudiantes": data.get("n_estudiantes"),
+        "n_variables": data.get("n_variables"),
+        "correlacion_pearson": data.get("correlacion_pearson"),
+        "coincidencia_direccion_pct": data.get("coincidencia_direccion_pct"),
+    }
 
 
 def format_shap_factor_for_ui(factor: dict[str, Any] | None, max_abs_impact: float = 1.0) -> dict[str, Any]:
